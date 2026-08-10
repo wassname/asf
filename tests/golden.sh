@@ -32,25 +32,41 @@ QUERIES=(
     "--rows -c staging directory"
 )
 
+one() {  # name bin index
+    local file="tests/golden/$1/$(printf '%02d' "$3").txt"
+    mkdir -p "tests/golden/$1"
+    # shellcheck disable=SC2086
+    $2 ${QUERIES[$3]} -n 8 > "$file" 2>&1
+    echo "exit=$?" >> "$file"
+}
+
 record() {
-    local name="$1" bin="$2" dir="tests/golden/$1"
-    mkdir -p "$dir"
+    local name="$1" bin="$2"
+    for i in "${!QUERIES[@]}"; do one "$name" "$bin" "$i"; done
+    echo "recorded ${#QUERIES[@]} queries to tests/golden/$name"
+}
+
+# Record both builds per query, seconds apart. A live session gets written while this runs,
+# so two full passes drift: rows move and counts differ for reasons that are not the code.
+both() {
     for i in "${!QUERIES[@]}"; do
-        # shellcheck disable=SC2086
-        $bin ${QUERIES[$i]} -n 8 > "$dir/$(printf '%02d' "$i").txt" 2>&1
-        echo "exit=$?" >> "$dir/$(printf '%02d' "$i").txt"
+        one python "$1" "$i"
+        one rust "$2" "$i"
     done
-    echo "recorded ${#QUERIES[@]} queries to $dir"
+    echo "recorded ${#QUERIES[@]} queries for both builds"
 }
 
 case "${1:-diff}" in
     record) record "$2" "$3" ;;
+    both) both "$2" "$3" ;;
     diff)
         fail=0
         for f in tests/golden/python/*.txt; do
             b=tests/golden/rust/$(basename "$f")
             [ -f "$b" ] || { echo "MISSING $b"; fail=1; continue; }
-            if ! diff -q "$f" "$b" >/dev/null; then
+            # sorted: a session written while this runs moves rank between the two reads,
+            # so compare the set of rows, not their order
+            if ! diff -q <(sort "$f") <(sort "$b") >/dev/null; then
                 echo "DIFFERS $(basename "$f"): ${QUERIES[$((10#$(basename "$f" .txt)))]}"
                 fail=1
             fi

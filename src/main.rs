@@ -178,6 +178,14 @@ fn main() {
         return;
     }
 
+    // a store that moved or got renamed would otherwise just go quiet
+    for (agent, _) in SOURCES {
+        let store = sessions::store(agent);
+        if !store.exists() {
+            eprintln!("asf: no {agent} store at {}", store.display());
+        }
+    }
+
     let query = args.query.join(" ");
     let mut rows = if args.content {
         if query.is_empty() {
