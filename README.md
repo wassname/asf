@@ -79,16 +79,19 @@ real session names and paths.
 
 ## Supply chain
 
-`Cargo.lock` is committed, and `scripts/dep-age.py` fails if any locked crate version is
-younger than 8 days. Most compromised releases are caught within days, so waiting removes
-most of the risk. cargo has no such setting yet, which is
-[rust-lang/cargo#15973](https://github.com/rust-lang/cargo/issues/15973), after pnpm shipped
-`minimumReleaseAge`.
+`Cargo.lock` is committed, and `.cargo/config.toml` refuses any crate version published in
+the last 8 days, because most compromised releases are caught within days. That is cargo's
+own [min-publish-age](https://doc.rust-lang.org/nightly/cargo/reference/unstable.html#min-publish-age),
+which is nightly-only for now, so resolving needs nightly and building does not:
 
 ```sh
-scripts/dep-age.py            # 164 locked crates, 0 younger than 8 days
-scripts/dep-age.py 8 --fix    # print the cargo update commands that pin older versions
+cargo +nightly update      # writes Cargo.lock under the 8 day hold
+cargo build --locked       # stable, builds exactly what the lock says
 ```
+
+With the hold off, 23 of these dependencies would move today, one of them published
+yesterday. Do not remove it to make an update go through: wait, or add a scoped exception
+for the one crate.
 
 ## One thing that bit me
 

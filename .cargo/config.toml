@@ -1,0 +1,12 @@
+# Do not resolve to a crate version published in the last 8 days: most compromised
+# releases are caught within days. Needs nightly cargo, so run `cargo +nightly update`
+# to change Cargo.lock; stable builds then use the lock as it is.
+# https://doc.rust-lang.org/nightly/cargo/reference/unstable.html#min-publish-age
+[unstable]
+min-publish-age = true
+
+[registry]
+global-min-publish-age = "8 days"
+
+[resolver]
+incompatible-publish-age = "deny"
