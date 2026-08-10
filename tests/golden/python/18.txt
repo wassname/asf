@@ -1,5 +1,0 @@
-/home/wassname/.claude/projects/-home-wassname--agents-skills/8c85de1e-af20-4ad1-9e50-576faa32a5fb.jsonl
-/home/wassname/.codex/sessions/2026/08/04/rollout-2026-08-04T12-19-27-019fcaff-787b-7943-a54c-5e4fae241735.jsonl
-/home/wassname/.codex/sessions/2026/08/03/rollout-2026-08-03T06-38-11-019fc4a0-abb9-7fc2-8215-dad60c6b7dfa.jsonl
-/home/wassname/.claude/projects/-media-wassname-SGIronWolf-projects5/7ea08d0d-75b1-47fc-9fd5-c3f31a07fcbd.jsonl
-exit=0

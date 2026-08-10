@@ -1,2 +1,0 @@
-nothing matched
-exit=0

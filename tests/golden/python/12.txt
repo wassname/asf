@@ -1,7 +1,0 @@
-| when       | agent  | project   | name                                                    | match                                                        | file                                                                                               |
-|------------|--------|-----------|---------------------------------------------------------|--------------------------------------------------------------|----------------------------------------------------------------------------------------------------|
-| 2026-08-11 | claude | skills    | Improve AI conversation search tool with fuzzy matching | fd5-c3f31a07fcbd.jsonl\nPHRASE: The profile ships in a stagi | ~/.claude/projects/-home-wassname--agents-skills/8c85de1e-af20-4ad1-9e50-576faa32a5fb.jsonl        |
-| 2026-07-29 | claude | projects5 | Sandbox options for Heres project                       | Found it. The profile ships in a staging directory, not `/et | ~/.claude/projects/-media-wassname-SGIronWolf-projects5/7ea08d0d-75b1-47fc-9fd5-c3f31a07fcbd.jsonl |
-
-2 sessions matched, showing 2
-exit=0
