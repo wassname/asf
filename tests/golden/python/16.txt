@@ -1,0 +1,13 @@
+| when       | agent  | project       | name                                                         | file                                                                      |
+|------------|--------|---------------|--------------------------------------------------------------|---------------------------------------------------------------------------|
+| 2026-06-09 | gemini | humanizer-1   | /model                                                       | ~/.gemini/tmp/humanizer-1/logs.json                                       |
+| 2026-06-09 | gemini | humanizer-1   | -                                                            | ~/.gemini/tmp/humanizer-1/chats/session-2026-06-09T06-17-2faff8c8.jsonl   |
+| 2026-06-04 | gemini | ssh           | -                                                            | ~/.gemini/tmp/ssh/chats/session-2026-06-04T00-40-3f31bf9f.jsonl           |
+| 2026-05-25 | gemini | antipodal-dpo | # Memory leak hunt -- antipodal_dpo training loop You are re | ~/.gemini/tmp/antipodal-dpo/chats/session-2026-05-25T09-33-5fecc906.jsonl |
+| 2026-05-24 | gemini | homelab       | is the github backup working                                 | ~/.gemini/tmp/homelab/chats/session-2026-05-24T03-04-69780c13.jsonl       |
+| 2026-05-24 | gemini | homelab       | is the github backup working                                 | ~/.gemini/tmp/homelab/logs.json                                           |
+| 2026-05-23 | gemini | tweakcc       | as per @CLAUDE.md can you update to the latest? I see "2.1.1 | ~/.gemini/tmp/tweakcc/chats/session-2026-05-22T12-00-9009fab0.jsonl       |
+| 2026-05-23 | gemini | tweakcc       | /model                                                       | ~/.gemini/tmp/tweakcc/logs.json                                           |
+
+92 sessions matched, showing 8
+exit=0

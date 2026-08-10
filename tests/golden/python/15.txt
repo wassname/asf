@@ -1,0 +1,13 @@
+| when       | agent    | project    | name                                                         | file                                                                                                                 |
+|------------|----------|------------|--------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------|
+| 2026-02-24 | opencode | AntiPaSTO2 | Evaluation metric readout and "broke" calculation idea       | ~/.local/share/opencode/storage/session/0196d97a77478e77c6747c7ed8d02644838b6ab7/ses_375ce7df2ffe9OnHq6qNI3KGpa.json |
+| 2026-02-24 | opencode | AntiPaSTO2 | review changes [commit|branch|pr], defaults to uncommitted ( | ~/.local/share/opencode/storage/session/0196d97a77478e77c6747c7ed8d02644838b6ab7/ses_37173fa5fffeLH5bZmPjw6jFRw.json |
+| 2026-02-24 | opencode | AntiPaSTO2 | Uncomment justfile sweeps, append to queue                   | ~/.local/share/opencode/storage/session/0196d97a77478e77c6747c7ed8d02644838b6ab7/ses_371ba054effeJmxPj7RSiaE3qf.json |
+| 2026-02-24 | opencode | AntiPaSTO2 | SWEeps results analysis for gemma1b experiments (fork #1)    | ~/.local/share/opencode/storage/session/0196d97a77478e77c6747c7ed8d02644838b6ab7/ses_372bc3098fferV7Lw8CWp4BHto.json |
+| 2026-02-24 | opencode | AntiPaSTO2 | SWEeps results analysis for gemma1b experiments              | ~/.local/share/opencode/storage/session/0196d97a77478e77c6747c7ed8d02644838b6ab7/ses_375566db9ffeOxEB8kkD4P7gOd.json |
+| 2026-02-24 | opencode | AntiPaSTO2 | Verify l1_trip + basis_side vs spec (@general subagent)      | ~/.local/share/opencode/storage/session/0196d97a77478e77c6747c7ed8d02644838b6ab7/ses_372be5cf4ffeZ7Ptux61xkOr4J.json |
+| 2026-02-24 | opencode | AntiPaSTO2 | Verify givens_perm vs spec (@general subagent)               | ~/.local/share/opencode/storage/session/0196d97a77478e77c6747c7ed8d02644838b6ab7/ses_372be7981ffe2vU1LhRb0I6Hyk.json |
+| 2026-02-24 | opencode | AntiPaSTO2 | review uncommitted changes (@general subagent)               | ~/.local/share/opencode/storage/session/0196d97a77478e77c6747c7ed8d02644838b6ab7/ses_372d1b63affeld6fPYpzC0VGBE.json |
+
+275 sessions matched, showing 8
+exit=0

@@ -1,0 +1,13 @@
+| when       | agent | project  | name                                                         | file                                                                                                |
+|------------|-------|----------|--------------------------------------------------------------|-----------------------------------------------------------------------------------------------------|
+| 2026-08-09 | codex | arj      | what do you think about research journal as used? """ ● Bash | ~/.codex/sessions/2026/08/09/rollout-2026-08-09T10-50-54-019fe46e-312c-7c21-9970-ffafb442114d.jsonl |
+| 2026-08-09 | codex | arj      | -                                                            | ~/.codex/sessions/2026/08/09/rollout-2026-08-09T11-07-02-019fe47c-f67b-7352-bcdf-d875f1887032.jsonl |
+| 2026-08-09 | codex | arj      | -                                                            | ~/.codex/sessions/2026/08/09/rollout-2026-08-09T11-03-12-019fe479-746e-77a2-8299-507d2edf220b.jsonl |
+| 2026-08-04 | codex | homelab  | why do you think my audiobookshelf server can't show "/media | ~/.codex/sessions/2026/07/31/rollout-2026-07-31T16-33-19-019fb74e-7465-71f0-bdde-4554c63d4663.jsonl |
+| 2026-08-04 | codex | homelab  | why do you think my audiobookshelf server can't show "/media | ~/.codex/sessions/2026/08/04/rollout-2026-08-04T12-19-27-019fcaff-787b-7943-a54c-5e4fae241735.jsonl |
+| 2026-08-03 | codex | voicebot | so in this repo I wanted help, where AI would write in my ow | ~/.codex/sessions/2026/08/01/rollout-2026-08-01T10-35-45-019fbb2d-70b1-7db1-b1d1-5f5e1664b70b.jsonl |
+| 2026-08-03 | codex | ssGROUT  | an opus agent really messed up in this repo """ ● You're rig | ~/.codex/sessions/2026/08/03/rollout-2026-08-03T17-41-36-019fc700-09d1-7222-928e-3f65c04c50bd.jsonl |
+| 2026-08-03 | codex | homelab  | why do you think my audiobookshelf server can't show "/media | ~/.codex/sessions/2026/08/03/rollout-2026-08-03T06-38-11-019fc4a0-abb9-7fc2-8215-dad60c6b7dfa.jsonl |
+
+504 sessions matched, showing 8
+exit=0

@@ -1,0 +1,13 @@
+| when       | agent  | project            | name                                                         | file                                                                                                                       |
+|------------|--------|--------------------|--------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------|
+| 2026-08-11 | claude | j-steer-dev        | lets resume last agent said """Handover and specs are update | ~/.claude/projects/-media-wassname-SGIronWolf-projects5-2026-jspace-j-steer-dev/8b452c1f-c9fe-436d-8277-3c0471a17906.jsonl |
+| 2026-08-02 | codex  | w2schar-mini       | >>> APPROVAL REQUEST END { "command": [ "/usr/bin/zsh", "-lc | ~/.codex/sessions/2026/08/01/rollout-2026-08-01T14-22-16-019fbbfc-d54d-79f3-b11a-4a89a3376ca0.jsonl                        |
+| 2026-07-18 | codex  | j-steer-dev        | >>> APPROVAL REQUEST END { "command": [ "/usr/bin/zsh", "-lc | ~/.codex/sessions/2026/07/18/rollout-2026-07-18T12-06-00-019f7367-085e-7880-894f-9fec177f8d02.jsonl                        |
+| 2026-07-16 | codex  | AntiPaSTO_concepts | >>> APPROVAL REQUEST END { "command": [ "/usr/bin/zsh", "-lc | ~/.codex/sessions/2026/07/16/rollout-2026-07-16T15-40-37-019f69de-d080-7dd0-a18b-be1a5aa1382d.jsonl                        |
+| 2026-07-14 | codex  | docs               | >>> APPROVAL REQUEST END { "command": [ "/usr/bin/zsh", "-lc | ~/.codex/sessions/2026/07/12/rollout-2026-07-12T15-48-56-019f554c-fa56-7a72-b638-6251044c9389.jsonl                        |
+| 2026-07-13 | codex  | ml-debug           | >>> APPROVAL REQUEST END { "command": [ "/usr/bin/zsh", "-lc | ~/.codex/sessions/2026/07/12/rollout-2026-07-12T10-48-20-019f5439-c5f2-7b52-abc0-539c3730a648.jsonl                        |
+| 2026-07-13 | codex  | ml-debug           | >>> APPROVAL REQUEST END { "command": [ "/usr/bin/zsh", "-lc | ~/.codex/sessions/2026/07/12/rollout-2026-07-12T21-54-11-019f569b-6191-7390-a6a8-66768fa07bd4.jsonl                        |
+| 2026-07-13 | codex  | ml-debug           | >>> APPROVAL REQUEST END { "command": [ "/usr/bin/zsh", "-lc | ~/.codex/sessions/2026/07/13/rollout-2026-07-13T06-00-52-019f5858-f3ce-76e0-846d-1253b38edfce.jsonl                        |
+
+104 sessions matched, showing 8
+exit=0

@@ -1,0 +1,21 @@
+[package]
+name = "asf"
+version = "0.1.0"
+edition = "2021"
+description = "Find a past coding-agent session by name, or by anything said inside it"
+repository = "https://github.com/wassname/asf"
+license = "MIT"
+
+[dependencies]
+# ripgrep's own engine, as libraries: the walk, the matcher, the searcher
+ignore = "0.4.33"
+grep-regex = "0.1.14"
+grep-searcher = "0.1.17"
+serde_json = "1.0.151"
+clap = { version = "4.6", features = ["derive"] }
+skim = "0.20"
+regex = "1.11"
+
+[profile.release]
+lto = true
+strip = true
