@@ -3,46 +3,54 @@
 Find a past coding-agent session by its name, or by anything said inside it. Claude Code,
 Codex, pi, opencode, gemini, copilot. No index, so nothing goes stale.
 
-Status: porting from python to rust. The python version works and is in daily use at
-`~/.agents/skills/asf/scripts/asf`. This repo is the rust port.
-
-## Why a port
-
-The python version shells out to ripgrep and parses its json back. That boundary hid two
-real bugs: ripgrep's exit code 2 was discarded, so a query containing `(` printed
-"nothing matched", and python's `splitlines()` tore a ripgrep record in half on a control
-byte inside a pdf that opencode had stored. Linking ripgrep's own crates makes those
-errors typed instead of textual, and gives one binary to install.
-
-| job | crate |
-|---|---|
-| walk the session directories | `ignore` |
-| search | `grep-searcher`, `grep-regex` |
-| read records | `serde_json` |
-| the picker | `skim` |
-
-## The port has an oracle, use it
-
-`tests/golden.sh` records what one build prints for 20 queries, and diffs two builds. The
-queries are the ones three audits found faults with; do not trim them.
-
 ```sh
-tests/golden.sh record python ~/.agents/skills/asf/scripts/asf
-cargo build --release
-tests/golden.sh record rust target/release/asf
-tests/golden.sh diff
+asf                        # the newest sessions
+asf steer                  # sessions whose NAME matches
+asf -c "staging dir"       # sessions whose TRANSCRIPT matches, assistant text included
+asf -i steer               # pick one; enter prints the resume command
+asf --paths -c steer       # transcript paths, for piping
+asf --read PATH --tail 20  # the last 20 messages, as text
 ```
 
-Record both on the same day: the corpus grows, so golden output from last week will differ
-for reasons that have nothing to do with the port.
+Every row carries the transcript path, so the answer to "which session was that" is a path
+you can open, not a name you have to hunt for.
 
-## What the port must not lose
+```
+| when       | agent  | project     | name                          | match                        | file                       |
+|------------|--------|-------------|-------------------------------|------------------------------|----------------------------|
+| 2026-08-09 | claude | gpu-cloud   | Fix apparmor profile staging  | the profile ships in a stag  | ~/.claude/projects/...json |
+```
 
-These are the format faults three audits found. They are the value of the tool, not the
-code around them.
+## Install
 
-- codex stores your `AGENTS.md` in a `world_state` record in every transcript, so a
-  search for a phrase that only exists in that file matched 411 sessions
+```sh
+cargo install --path .
+```
+
+One binary, no runtime dependencies. It links ripgrep's crates for the search and skim's
+for the picker, so there is nothing to install alongside it.
+
+## How it searches 3.4 GB without an index
+
+Reading every transcript takes about a second, so there is nothing to build and nothing to
+go stale. Stopping each file at its first hit is what keeps a common word from returning
+200k rows; a row that turns out to be harness-pasted text gets a second, deeper look.
+
+Measured here, against 2415 sessions:
+
+| query | python, shelling out to rg | this |
+|---|---|---|
+| `asf` | 1.76 s | 0.34 s |
+| `asf steer` | 1.67 s | 0.35 s |
+| `asf -c the` | 3.28 s | 1.23 s |
+
+## What the format knowledge is worth
+
+These are the faults three audits found in real stores. They are the value of the tool, not
+the code around them.
+
+- codex stores your `AGENTS.md` in a `world_state` record in every transcript, so a search
+  for a phrase that only exists in that file matched 411 sessions
 - claude pastes its skill list into every session as an `attachment` record
 - claude files a tool result as a user turn, marked `toolUseResult`
 - an opencode session is not a file: it is `storage/message/<ses>/` plus
@@ -51,4 +59,41 @@ code around them.
   `logs.json` of prompts per project
 - copilot labels turns `user.message` and `assistant.message`, with no `role` key
 - hermes is not supported: its sessions live in `~/.hermes/state.db`, a sqlite file
-- an rg hit list can be 57k paths, over `ARG_MAX` for one argv
+
+## The oracle
+
+A python build of the same tool is the reference. `tests/golden.sh` records what one build
+prints for 20 queries and diffs two builds; the queries are the ones the audits found faults
+with, so do not trim them.
+
+```sh
+tests/golden.sh record python ~/.agents/skills/asf/scripts/asf
+cargo build --release
+tests/golden.sh record rust target/release/asf
+tests/golden.sh diff        # all 20 queries match
+```
+
+Record both on the same day: the corpus grows, so yesterday's recording differs for reasons
+that have nothing to do with the code. The recordings stay out of git, because they hold
+real session names and paths.
+
+## Supply chain
+
+`Cargo.lock` is committed, and `scripts/dep-age.py` fails if any locked crate version is
+younger than 8 days. Most compromised releases are caught within days, so waiting removes
+most of the risk. cargo has no such setting yet, which is
+[rust-lang/cargo#15973](https://github.com/rust-lang/cargo/issues/15973), after pnpm shipped
+`minimumReleaseAge`.
+
+```sh
+scripts/dep-age.py            # 164 locked crates, 0 younger than 8 days
+scripts/dep-age.py 8 --fix    # print the cargo update commands that pin older versions
+```
+
+## One thing that bit me
+
+Build a `grep_searcher::Searcher` per file, not per worker thread. A reused Searcher loses
+hits in the files it searches later: `asf -c opencode` found 340 sessions instead of 341,
+the same one missing every run. It is the line buffer, not the binary detection. Memory
+maps avoid it, which is what ripgrep does, but they measured slower here (1.75 s against
+1.05 s).
