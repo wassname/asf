@@ -130,6 +130,30 @@ pub fn resume_command(row: &Row) -> String {
     }
 }
 
+/// The resume command for one transcript path, read fresh. The picker needs this: after a
+/// reload its rows are new sessions the caller never scanned.
+pub fn resume_for_path(hit: &str) -> String {
+    let path = session_of(hit);
+    let agent = agent_of(&path);
+    let mut row = Row { path: path.clone(), agent: agent.clone(), ..Row::default() };
+    name_sessions(&[(agent, vec![PathBuf::from(&path)])], |_, cwd, _, _, _| {
+        if row.cwd.is_empty() {
+            row.cwd = cwd.to_string();
+        }
+    });
+    resume_command(&row)
+}
+
+/// An opencode hit is one shard; every shard names the session it belongs to.
+fn session_of(hit: &str) -> String {
+    let stem = Path::new(hit).file_stem().unwrap_or_default().to_string_lossy().to_string();
+    if agent_of(hit) != "opencode" || stem.starts_with("ses_") {
+        return hit.to_string();
+    }
+    let id = read_json(Path::new(hit)).map_or(String::new(), |e| find_value(&e, "sessionID"));
+    opencode_sessions().get(&id).cloned().unwrap_or_else(|| hit.to_string())
+}
+
 /// (line number, text) of the first message that is not a harness preamble.
 fn first_real(hits: &[scan::Hit]) -> (u64, String) {
     for hit in hits {

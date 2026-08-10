@@ -219,8 +219,7 @@ fn main() {
     if args.pick {
         rows.truncate(400);
         sessions::hydrate(&mut rows, &query);
-        let tsv = rows_tsv(&rows);
-        pick::pick(&rows, tsv);
+        pick::pick(rows_tsv(&rows));
     } else if args.rows {
         rows.truncate(args.limit);
         sessions::hydrate(&mut rows, &query);

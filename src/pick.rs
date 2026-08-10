@@ -3,11 +3,11 @@
 //! argues for: a scanner searches exhaustively and does not rank, a fuzzy finder ranks and
 //! does not scan gigabytes.
 
-use crate::sessions::{Row, resume_command};
+use crate::sessions::resume_for_path;
 use skim::prelude::*;
 use std::io::Cursor;
 
-pub fn pick(rows: &[Row], tsv: String) {
+pub fn pick(tsv: String) {
     let me = std::env::current_exe()
         .expect("cannot find my own path")
         .to_string_lossy()
@@ -52,9 +52,6 @@ pub fn pick(rows: &[Row], tsv: String) {
         println!("{}", fields[5]);
         return;
     }
-    // for opencode the picker shows the shard that matched, not the session file
-    match rows.iter().find(|r| r.path == fields[5] || r.hit == fields[5]) {
-        Some(row) => println!("{}", resume_command(row)),
-        None => println!("{}", fields[5]),
-    }
+    // read the session fresh: after ctrl-r these rows are ones the caller never scanned
+    println!("{}", resume_for_path(&fields[5]));
 }
