@@ -58,7 +58,20 @@ the code around them.
 - gemini writes half its session files as `.json` and half as `.jsonl`, plus one
   `logs.json` of prompts per project
 - copilot labels turns `user.message` and `assistant.message`, with no `role` key
-- hermes is not supported: its sessions live in `~/.hermes/state.db`, a sqlite file
+- hermes and Cursor are not supported: they keep sessions in sqlite, not in files
+
+## Prior art
+
+| tool | shape | why not this |
+|---|---|---|
+| [pratikgajjar/recall](https://github.com/pratikgajjar/recall) | Go, sqlite index, Cursor + claude + codex + pi | the nearest thing to asf, and the better tool if you want tags, cost stats and Cursor. It needs `recall index` first, and a 69.5 MiB index that `--prune` keeps honest. asf trades those features for having nothing to build |
+| [subinium/agf](https://github.com/subinium/agf) | Go, fzf over sessions | searches the last message, not the name and not the transcript |
+| [dmtrKovalenko/fff](https://github.com/dmtrKovalenko/fff) | Rust matcher, `fff-search` on crates.io | a library with no picker: no delimiter, preview or ANSI. Its author says it "loses on grep once from bash and exit", which is what this is |
+
+If you add a sqlite source, copy recall's care, not just its schema. Its
+[cursor.go](https://github.com/pratikgajjar/recall/blob/main/cursor.go) warns that a bare
+`path?params` DSN "is silently opened read-write and CHECKPOINTS a WAL database on close,
+mutating the user's source data". Use the `file:` URI form with `mode=ro&immutable=1`.
 
 ## The oracle
 
