@@ -1,4 +1,4 @@
-# asf
+# asf - agent session finder
 
 Find a past coding-agent session by its name, or by anything said inside it. Claude Code,
 Codex, pi, opencode, gemini, copilot. No index, so nothing goes stale.
