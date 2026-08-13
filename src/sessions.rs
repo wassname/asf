@@ -139,10 +139,14 @@ pub fn resume_command(row: &Row) -> String {
     };
     let cmd = template.replace("{sid}", &session_id(&row.path, &row.agent));
     if row.cwd.is_empty() {
-        cmd
-    } else {
-        format!("cd '{}' && {cmd}", row.cwd)
+        return cmd;
     }
+    if !Path::new(&row.cwd).exists() {
+        // codex resumes by id from anywhere; claude, pi and opencode scope the lookup to the
+        // directory, so for those this command is the proof that the session is stranded
+        return format!("# the directory it ran in is gone: {}\n{cmd}", row.cwd);
+    }
+    format!("cd '{}' && {cmd}", row.cwd)
 }
 
 /// The resume command for one transcript path, read fresh. The picker needs this: after a
