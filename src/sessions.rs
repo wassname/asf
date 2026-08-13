@@ -75,7 +75,7 @@ struct Found {
     sub: bool,
 }
 
-/// Rows in the order they were first seen, which is the order the table shows before sorting.
+/// Rows in the order they were first seen, which breaks ties after sorting by mtime.
 #[derive(Default)]
 pub struct Rows {
     order: Vec<String>,
@@ -500,35 +500,28 @@ pub fn hydrate(rows: &mut [Row], query: &str) {
     named_threads(rows);
 }
 
-/// Every part shard of an opencode session, in message order.
-fn opencode_parts(session_json: &str) -> Vec<PathBuf> {
+fn opencode_messages(session_json: &str) -> Vec<(PathBuf, Vec<PathBuf>)> {
     let root = store("opencode");
     let session = Path::new(session_json).file_stem().unwrap_or_default();
     let mut messages = scan::files_under(&root.join("message").join(session), "msg_");
     messages.sort();
-    let mut parts = Vec::new();
-    for message in messages {
-        let mut found =
-            scan::files_under(&root.join("part").join(message.file_stem().unwrap_or_default()), "prt_");
-        found.sort();
-        parts.extend(found);
-    }
-    parts
+    messages
+        .into_iter()
+        .map(|message| {
+            let stem = message.file_stem().unwrap_or_default();
+            let mut parts = scan::files_under(&root.join("part").join(stem), "prt_");
+            parts.sort();
+            (message, parts)
+        })
+        .collect()
 }
 
 /// opencode splits a session over storage/message/<ses>/ and storage/part/<msg>/.
 fn opencode_transcript(session_json: &str) -> Vec<String> {
-    let root = store("opencode");
-    let session = Path::new(session_json).file_stem().unwrap_or_default();
     let mut blocks = Vec::new();
-    let mut messages = scan::files_under(&root.join("message").join(session), "msg_");
-    messages.sort();
-    for message in messages {
+    for (message, parts) in opencode_messages(session_json) {
         let meta = read_json(&message).unwrap_or(Value::Null);
         let role = meta.get("role").and_then(Value::as_str).unwrap_or("?");
-        let stem = message.file_stem().unwrap_or_default();
-        let mut parts = scan::files_under(&root.join("part").join(stem), "prt_");
-        parts.sort();
         let said: Vec<String> = parts
             .iter()
             .filter_map(|p| read_json(p))
@@ -609,8 +602,9 @@ pub fn preview(path: &str, at: u64) -> String {
 fn files_named(path: &str) -> Vec<String> {
     let raw = match Path::new(path).file_stem().unwrap_or_default().to_string_lossy() {
         // opencode keeps the tool calls in its part shards, not in the session file
-        stem if stem.starts_with("ses_") => opencode_parts(path)
-            .iter()
+        stem if stem.starts_with("ses_") => opencode_messages(path)
+            .into_iter()
+            .flat_map(|(_, parts)| parts)
             .filter_map(|p| std::fs::read_to_string(p).ok())
             .collect::<Vec<_>>()
             .join("\n"),
