@@ -10,6 +10,14 @@ pub static TAGS: LazyLock<Regex> =
 pub static UUID: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}").unwrap());
 pub static SES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"ses_[A-Za-z0-9]+").unwrap());
+/// A file a tool call named: claude file_path, pi path, codex an apply_patch header in a shell.
+pub static FILE_ARG: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(concat!(
+        r#"(?:"(?:file_path|filePath|notebook_path|path)": ?""#,
+        r#"|\*\*\* (?:Add|Update|Delete) File: )([^"\\\n]+)"#,
+    ))
+    .unwrap()
+});
 
 /// preambles that are not what the session is about
 pub const JUNK: [&str; 17] = [

@@ -56,10 +56,19 @@ struct Args {
     /// print a transcript as text
     #[arg(long, value_name = "PATH")]
     read: Option<String>,
+    /// one screen about a transcript: where it ran, files it named, its first and last words
+    #[arg(long, value_name = "PATH")]
+    preview: Option<String>,
+    /// print the command that reopens a transcript
+    #[arg(long, value_name = "PATH")]
+    resume: Option<String>,
+    /// with --read, only the first N messages
+    #[arg(long, default_value_t = 0)]
+    head: usize,
     /// with --read, only the last N messages
     #[arg(long, default_value_t = 0)]
     tail: usize,
-    /// with --read, only the record on that line
+    /// with --read or --preview, the record on that line
     #[arg(long, default_value_t = 0)]
     line: u64,
 }
@@ -174,7 +183,15 @@ fn main() {
     let args = Args::parse();
 
     if let Some(path) = &args.read {
-        println!("{}", sessions::read(path, args.tail, args.line));
+        println!("{}", sessions::read(path, args.head, args.tail, args.line));
+        return;
+    }
+    if let Some(path) = &args.preview {
+        println!("{}", sessions::preview(path, args.line));
+        return;
+    }
+    if let Some(path) = &args.resume {
+        println!("{}", sessions::resume_for_path(path));
         return;
     }
 
@@ -187,11 +204,7 @@ fn main() {
     }
 
     let query = args.query.join(" ");
-    let mut rows = if args.content {
-        if query.is_empty() {
-            eprintln!("-c needs something to search for");
-            std::process::exit(1);
-        }
+    let mut rows = if args.content && !query.is_empty() {
         sessions::search_content(&query, args.regex)
     } else {
         let mut rows = sessions::load_sessions();
@@ -219,7 +232,7 @@ fn main() {
         rows.retain(|r| &r.agent == agent);
     }
     if !args.sub {
-        rows.retain(|r| !r.path.contains("/subagents/"));
+        sessions::drop_subagents(&mut rows);
     }
     rows.sort_by(|a, b| b.mtime.total_cmp(&a.mtime));
 
@@ -227,7 +240,15 @@ fn main() {
     if args.pick {
         rows.truncate(400);
         sessions::hydrate(&mut rows, &query);
-        pick::pick(rows_tsv(&rows));
+        // the picker reruns me for its transcript search, so it needs the same filters back
+        let mut filters = String::new();
+        if let Some(agent) = &args.agent {
+            filters.push_str(&format!(" -a {agent}"));
+        }
+        if args.sub {
+            filters.push_str(" --sub");
+        }
+        pick::pick(rows_tsv(&rows), &filters, &query);
     } else if args.rows {
         rows.truncate(args.limit);
         sessions::hydrate(&mut rows, &query);

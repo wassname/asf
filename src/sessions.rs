@@ -18,13 +18,18 @@ pub const SOURCES: [(&str, &str); 6] = [
     ("copilot", ".copilot/session-state"),
 ];
 
-/// how to reopen a session, by agent
-const RESUME: [(&str, &str); 4] = [
+/// how to reopen a session, by agent. gemini is absent: its --resume takes `latest` or a
+/// list index, never an id.
+const RESUME: [(&str, &str); 5] = [
     ("claude", "claude --resume {sid}"),
     ("codex", "codex resume {sid}"),
     ("pi", "pi --session {sid}"),
     ("opencode", "opencode --session {sid}"),
+    ("copilot", "copilot --resume={sid}"),
 ];
+
+/// what claude writes when you /rename a session
+const RENAMED: &str = r#""type":"custom-title""#;
 
 /// (first user message, session header) per agent. The header carries the working directory.
 const NAME_PATTERNS: [(&str, &str, &str); 5] = [
@@ -105,17 +110,27 @@ pub fn agent_of(path: &str) -> String {
 pub fn session_id(path: &str, agent: &str) -> String {
     let p = Path::new(path);
     let stem = p.file_stem().unwrap_or_default().to_string_lossy().to_string();
+    let dir = |up: &Path| up.file_name().unwrap_or_default().to_string_lossy().to_string();
     if p.parent().and_then(Path::file_name).is_some_and(|n| n == "subagents")
-        && let Some(parent) = p.parent().and_then(Path::parent).and_then(Path::file_name) {
-            return parent.to_string_lossy().to_string();
+        && let Some(parent) = p.parent().and_then(Path::parent) {
+            return dir(parent);
         }
-    if agent == "opencode" {
-        return stem;
+    match agent {
+        "opencode" => stem,
+        // the id is inside the record: a pi filename truncates it at an underscore, and for
+        // 8 of 1216 sessions here the filename uuid is not the one pi answers to
+        "pi" => first_record(path).map_or(stem, |e| find_value(&e, "id")),
+        // copilot names the session directory, not the events.jsonl inside it
+        "copilot" => p.parent().map_or(stem, dir),
+        _ => match UUID.find(&stem) {
+            Some(found) => found.as_str().to_string(),
+            None => stem,
+        },
     }
-    match UUID.find(&stem) {
-        Some(found) => found.as_str().to_string(),
-        None => stem.rsplit('_').next().unwrap_or(&stem).to_string(),
-    }
+}
+
+fn first_record(path: &str) -> Option<Value> {
+    parse(std::io::BufRead::lines(std::io::BufReader::new(std::fs::File::open(path).ok()?)).next()?.ok()?.as_str())
 }
 
 pub fn resume_command(row: &Row) -> String {
@@ -205,6 +220,15 @@ where
                     .map_or(String::new(), |e| find_value(&e, "aiTitle"));
                 add(&path, "", &clean(&title, 110), 0, true);
             }
+            // /rename beats both, and repeats the record, so take the last one in the file.
+            // Two passes: find the few files that were renamed, then read those in full.
+            let renamed: Vec<PathBuf> =
+                names(RENAMED, paths, 1).keys().map(PathBuf::from).collect();
+            for (path, hits) in names(RENAMED, &renamed, usize::MAX) {
+                let title = parse(&hits[hits.len() - 1].text)
+                    .map_or(String::new(), |e| find_value(&e, "customTitle"));
+                add(&path, "", &clean(&title, 110), 0, true);
+            }
         }
         if agent == "opencode" {
             // its metadata file already holds a title
@@ -259,6 +283,25 @@ fn stores_for_names() -> Vec<(String, Vec<PathBuf>)> {
     stores
 }
 
+/// A codex thread you named keeps that name in codex's own index, not in the rollout.
+fn named_threads(rows: &mut [Row]) {
+    if !rows.iter().any(|r| r.agent == "codex") {
+        return;
+    }
+    let index = std::fs::read_to_string(home().join(".codex/session_index.jsonl")).unwrap_or_default();
+    let names: HashMap<String, String> = index
+        .lines()
+        .filter_map(parse)
+        .map(|e| (find_value(&e, "id"), find_value(&e, "thread_name")))
+        .filter(|(id, name)| !id.is_empty() && !name.is_empty())
+        .collect();
+    for row in rows.iter_mut().filter(|r| r.agent == "codex") {
+        if let Some(name) = names.get(&session_id(&row.path, "codex")) {
+            row.title = clean(name, 110);
+        }
+    }
+}
+
 /// One row per session: agent, path, mtime, cwd, title.
 pub fn load_sessions() -> Vec<Row> {
     let mut rows = Rows::default();
@@ -285,6 +328,7 @@ pub fn load_sessions() -> Vec<Row> {
         }
         row.mtime = mtime(&row.path);
     }
+    named_threads(&mut rows);
     rows
 }
 
@@ -422,6 +466,23 @@ pub fn hydrate(rows: &mut [Row], query: &str) {
             row.title = title.clone();
         }
     }
+    named_threads(rows);
+}
+
+/// Every part shard of an opencode session, in message order.
+fn opencode_parts(session_json: &str) -> Vec<PathBuf> {
+    let root = store("opencode");
+    let session = Path::new(session_json).file_stem().unwrap_or_default();
+    let mut messages = scan::files_under(&root.join("message").join(session), "msg_");
+    messages.sort();
+    let mut parts = Vec::new();
+    for message in messages {
+        let mut found =
+            scan::files_under(&root.join("part").join(message.file_stem().unwrap_or_default()), "prt_");
+        found.sort();
+        parts.extend(found);
+    }
+    parts
 }
 
 /// opencode splits a session over storage/message/<ses>/ and storage/part/<msg>/.
@@ -454,11 +515,93 @@ fn opencode_transcript(session_json: &str) -> Vec<String> {
 ///
 /// `at` prints only the record on that line, which is what the picker previews. Otherwise
 /// only the conversation: tool calls, their results and the harness preambles are dropped.
-pub fn read(path: &str, tail: usize, at: u64) -> String {
+pub fn read(path: &str, head: usize, tail: usize, at: u64) -> String {
+    let blocks = blocks(path, at);
+    ends(&blocks, head, tail).join("\n\n")
+}
+
+/// Drop the sessions an agent ran for itself: you cannot resume them, and they crowd out yours.
+/// claude puts them in a subagents/ directory, codex records them like any other session and
+/// says so in the header.
+pub fn drop_subagents(rows: &mut Vec<Row>) {
+    let codex: Vec<PathBuf> = rows
+        .iter()
+        .filter(|r| r.agent == "codex")
+        .map(|r| PathBuf::from(&r.path))
+        .collect();
+    let sub = scan::search(
+        r#""type":"session_meta"[^\n]*"subagent""#,
+        &codex,
+        &Scan { literal: false, icase: false, globs: &[], max_count: 1 },
+    );
+    rows.retain(|r| !r.path.contains("/subagents/") && !sub.contains_key(&r.path));
+}
+
+/// Where it ran, the files it named, the record that matched, then its first and last words.
+pub fn preview(path: &str, at: u64) -> String {
+    let agent = agent_of(path);
+    let mut cwd = String::new();
+    let mut title = String::new();
+    name_sessions(&[(agent.clone(), vec![PathBuf::from(path)])], |_, found, named, _, force| {
+        if cwd.is_empty() {
+            cwd = found.to_string();
+        }
+        if (force && !named.is_empty()) || title.is_empty() {
+            title = named.to_string();
+        }
+    });
+
+    let mut out = vec![format!("{agent}  {}", if cwd.is_empty() { path } else { &cwd })];
+    if !title.is_empty() {
+        out.push(clean(&title, 200));
+    }
+    let files = files_named(path);
+    if !files.is_empty() {
+        out.push(cut(&format!("files: {}", files.join(" ")), 220));
+    }
+    let said = blocks(path, 0);
+    let matched = if at == 0 { String::new() } else { read(path, 0, 0, at) };
+    // in name mode the match IS the first message, and printing it twice wastes the pane
+    if !matched.is_empty() && said.first() != Some(&matched) {
+        out.push(format!("--- match, line {at} ---"));
+        out.push(cut(&matched, 1200));
+    }
+    out.push(String::new());
+    for block in ends(&said, 2, 6) {
+        out.push(cut(&block, 700));
+    }
+    out.join("\n")
+}
+
+/// Files the session named in a tool call, read from the raw records: each agent has its own key.
+fn files_named(path: &str) -> Vec<String> {
+    let raw = match Path::new(path).file_stem().unwrap_or_default().to_string_lossy() {
+        // opencode keeps the tool calls in its part shards, not in the session file
+        stem if stem.starts_with("ses_") => opencode_parts(path)
+            .iter()
+            .filter_map(|p| std::fs::read_to_string(p).ok())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::from_utf8_lossy(&std::fs::read(path).unwrap_or_default()).into_owned(),
+    };
+    let mut seen: Vec<String> = Vec::new();
+    for found in FILE_ARG.captures_iter(&raw) {
+        let name = &found[1];
+        let short = name.rsplit('/').next().unwrap_or(name).to_string();
+        if !short.is_empty() && !seen.contains(&short) {
+            seen.push(short);
+        }
+    }
+    seen.truncate(12);
+    seen
+}
+
+/// One block per message, in order.
+fn blocks(path: &str, at: u64) -> Vec<String> {
     let stem = Path::new(path).file_stem().unwrap_or_default().to_string_lossy().to_string();
     if stem.starts_with("ses_") {
         // opencode: a session is a directory of shards
-        return last(opencode_transcript(path), tail).join("\n\n");
+        return opencode_transcript(path);
     }
     let mut blocks = Vec::new();
     let raw = std::fs::read(path).unwrap_or_default();
@@ -467,24 +610,8 @@ pub fn read(path: &str, tail: usize, at: u64) -> String {
         if at != 0 && line_no != at {
             continue;
         }
-        let Some(entry) = parse(line) else { continue };
-        if entry.get("toolUseResult").is_some() && at == 0 {
-            continue; // claude files a tool result as a user turn
-        }
-        let role = role_of(&entry);
-        let said: Vec<String> = texts(&entry)
-            .into_iter()
-            .filter(|t| !t.trim().is_empty())
-            .filter(|t| at != 0 || !is_junk(t))
-            .collect();
-        let mut body = said.join("\n");
-        if at != 0 && body.is_empty() {
-            // the match landed in a tool call; show the record itself
-            body = cut(&serde_json::to_string_pretty(&entry).unwrap_or_default(), 4000);
-        }
-        if !body.is_empty() && (at != 0 || role == "user" || role == "assistant") {
-            blocks.push(format!("--- {role} ---\n{body}"));
-        }
+        let Some(block) = block(line, at != 0) else { continue };
+        blocks.push(block);
     }
     if blocks.is_empty() {
         // not jsonl: gemini's logs.json is one array for the whole project
@@ -496,12 +623,39 @@ pub fn read(path: &str, tail: usize, at: u64) -> String {
             blocks.push(said.join("\n"));
         }
     }
-    last(blocks, tail).join("\n\n")
+    blocks
 }
 
-fn last(blocks: Vec<String>, tail: usize) -> Vec<String> {
-    if tail == 0 || blocks.len() <= tail {
-        return blocks;
+/// One record as `--- role ---\nwhat was said`; `verbatim` keeps preambles and tool calls too.
+fn block(line: &str, verbatim: bool) -> Option<String> {
+    let entry = parse(line)?;
+    if entry.get("toolUseResult").is_some() && !verbatim {
+        return None; // claude files a tool result as a user turn
     }
-    blocks[blocks.len() - tail..].to_vec()
+    let role = role_of(&entry);
+    let said: Vec<String> = texts(&entry)
+        .into_iter()
+        .filter(|t| !t.trim().is_empty())
+        .filter(|t| verbatim || !is_junk(t))
+        .collect();
+    let mut body = said.join("\n");
+    if verbatim && body.is_empty() {
+        // the match landed in a tool call; show the record itself
+        body = cut(&serde_json::to_string_pretty(&entry).unwrap_or_default(), 4000);
+    }
+    if body.is_empty() || !(verbatim || role == "user" || role == "assistant") {
+        return None;
+    }
+    Some(format!("--- {role} ---\n{body}"))
+}
+
+/// The first `head` and last `tail` blocks, with a marker for the dropped middle. 0,0 is all.
+fn ends(blocks: &[String], head: usize, tail: usize) -> Vec<String> {
+    if head + tail == 0 || blocks.len() <= head + tail {
+        return blocks.to_vec();
+    }
+    let mut kept: Vec<String> = blocks[..head].to_vec();
+    kept.push(format!("--- {} messages ---", blocks.len() - head - tail));
+    kept.extend_from_slice(&blocks[blocks.len() - tail..]);
+    kept
 }
