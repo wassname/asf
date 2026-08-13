@@ -20,6 +20,7 @@ you can open, not a name you have to hunt for.
 |------------|--------|-------------|-------------------------------|------------------------------|----------------------------|
 | 2026-08-09 | claude | gpu-cloud   | Fix apparmor profile staging  | the profile ships in a stag  | ~/.claude/projects/...json |
 ```
+<img width="1173" height="180" alt="image" src="https://github.com/user-attachments/assets/64254e7f-a91f-45e4-b22b-06e890c8e8f5" />
 
 ## Install
 
