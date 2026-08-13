@@ -1,7 +1,4 @@
-//! The picker. skim ranks the rows it already has; ctrl-q switches the query to a command
-//! that rescans every transcript. Same split as junegunn's ripgrep and fzf modes, and the one
-//! ripgrep's author argues for: a scanner searches exhaustively and does not rank, a fuzzy
-//! finder ranks and does not scan gigabytes.
+//! skim ranks loaded names; ctrl-q switches to a command that rescans every transcript.
 
 use crate::sessions::{SOURCES, resume_for_path};
 use skim::prelude::*;

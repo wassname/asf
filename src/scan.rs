@@ -122,10 +122,7 @@ pub fn search(pattern: &str, paths: &[PathBuf], scan: &Scan) -> Hits {
     walk.build_parallel().run(|| {
         let matcher = matcher.clone();
         Box::new(move |entry| {
-            // one Searcher per file, not per thread: a reused Searcher loses hits in later
-            // files, which cost `asf -c opencode` one of its 341 sessions, every run. It is
-            // the line buffer, not the binary detection: memory maps fix it too, but they
-            // measured slower here (1.75s against 1.05s).
+            // A reused Searcher loses later-file hits because its line buffer carries state.
             let mut searcher = SearcherBuilder::new()
                 .binary_detection(BinaryDetection::quit(0))
                 .line_number(true)
