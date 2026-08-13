@@ -28,7 +28,7 @@ It searches with ripgrep's crates instead of an index: half a second over 3.7 GB
 
 ## The picker
 
-`asf -i` loads the newest 400 rows and lets skim rank them.
+`asf -i` loads every session and lets skim rank them.
 
 | key | |
 |---|---|
