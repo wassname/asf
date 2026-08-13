@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["pyte"]
+# ///
 """Drive the picker in a pty and print what the screen ended up showing.
 
     tests/drive.py 'target/release/asf -i steer' Down Down PageDown --sleep 3
