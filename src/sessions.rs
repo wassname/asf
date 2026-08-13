@@ -60,6 +60,19 @@ pub struct Row {
     pub raw: String,
     pub mtime: f64,
     pub line: u64,
+    /// a run the agent started for itself, which you cannot resume
+    pub sub: bool,
+}
+
+/// What one scan learned about a session.
+#[derive(Default)]
+struct Found {
+    cwd: String,
+    title: String,
+    line: u64,
+    /// the name the agent keeps for itself beats the first message
+    force: bool,
+    sub: bool,
 }
 
 /// Rows in the order they were first seen, which is the order the table shows before sorting.
@@ -80,6 +93,8 @@ impl Rows {
                     hit: path.to_string(),
                     agent: agent_of(path),
                     line: 1,
+                    // claude keeps its subagent logs in a directory of their own
+                    sub: path.contains("/subagents/"),
                     ..Row::default()
                 },
             );
@@ -155,9 +170,9 @@ pub fn resume_for_path(hit: &str) -> String {
     let path = session_of(hit);
     let agent = agent_of(&path);
     let mut row = Row { path: path.clone(), agent: agent.clone(), ..Row::default() };
-    name_sessions(&[(agent, vec![PathBuf::from(&path)])], |_, cwd, _, _, _| {
+    name_sessions(&[(agent, vec![PathBuf::from(&path)])], |_, found| {
         if row.cwd.is_empty() {
-            row.cwd = cwd.to_string();
+            row.cwd = found.cwd;
         }
     });
     resume_command(&row)
@@ -193,7 +208,7 @@ fn read_json(path: &Path) -> Option<Value> {
 /// handful of files, which is why content mode can afford to call it too.
 fn name_sessions<F>(stores: &[(String, Vec<PathBuf>)], mut add: F)
 where
-    F: FnMut(&str, &str, &str, u64, bool),
+    F: FnMut(&str, Found),
 {
     let names = |pattern: &str, paths: &[PathBuf], max_count: usize| -> Hits {
         scan::search(
@@ -207,14 +222,16 @@ where
         if let Some((_, _, header)) = found.filter(|(_, _, h)| !h.is_empty()) {
             for (path, hits) in names(header, paths, 1) {
                 let cwd = parse(&hits[0].text).map_or(String::new(), |e| find_value(&e, "cwd"));
-                add(&path, &cwd, "", 0, false);
+                // codex records a run it started for itself like any other session
+                let sub = hits[0].text.contains(r#""subagent""#);
+                add(&path, Found { cwd, sub, ..Found::default() });
             }
         }
         if let Some((_, pattern, _)) = found.filter(|(_, p, _)| !p.is_empty()) {
             for (path, hits) in names(pattern, paths, 4) {
                 let (line, said) = first_real(&hits);
                 let cwd = parse(&hits[0].text).map_or(String::new(), |e| find_value(&e, "cwd"));
-                add(&path, &cwd, &clean(&said, 110), line, false);
+                add(&path, Found { cwd, title: clean(&said, 110), line, ..Found::default() });
             }
         }
         if agent == "claude" {
@@ -222,7 +239,7 @@ where
             for (path, hits) in names(r#""type":"ai-title""#, paths, 1) {
                 let title = parse(&hits[0].text)
                     .map_or(String::new(), |e| find_value(&e, "aiTitle"));
-                add(&path, "", &clean(&title, 110), 0, true);
+                add(&path, Found { title: clean(&title, 110), force: true, ..Found::default() });
             }
             // /rename beats both, and repeats the record, so take the last one in the file.
             // Two passes: find the few files that were renamed, then read those in full.
@@ -231,16 +248,24 @@ where
             for (path, hits) in names(RENAMED, &renamed, usize::MAX) {
                 let title = parse(&hits[hits.len() - 1].text)
                     .map_or(String::new(), |e| find_value(&e, "customTitle"));
-                add(&path, "", &clean(&title, 110), 0, true);
+                add(&path, Found { title: clean(&title, 110), force: true, ..Found::default() });
             }
         }
         if agent == "opencode" {
-            // its metadata file already holds a title
+            // its metadata file already holds a title, and names its parent if it has one
             for path in paths {
                 let meta = read_json(path).unwrap_or(Value::Null);
                 let cwd = meta.get("directory").and_then(Value::as_str).unwrap_or("");
                 let title = meta.get("title").and_then(Value::as_str).unwrap_or("");
-                add(&path.to_string_lossy(), cwd, &clean(title, 110), 0, false);
+                add(
+                    &path.to_string_lossy(),
+                    Found {
+                        cwd: cwd.to_string(),
+                        title: clean(title, 110),
+                        sub: meta.get("parentID").is_some(),
+                        ..Found::default()
+                    },
+                );
             }
         }
         if agent == "gemini" {
@@ -255,10 +280,11 @@ where
                 let project = path.parent().and_then(Path::file_name).unwrap_or_default();
                 add(
                     &path.to_string_lossy(),
-                    &project.to_string_lossy(),
-                    &clean(first, 110),
-                    0,
-                    false,
+                    Found {
+                        cwd: project.to_string_lossy().into_owned(),
+                        title: clean(first, 110),
+                        ..Found::default()
+                    },
                 );
             }
         }
@@ -309,17 +335,18 @@ fn named_threads(rows: &mut [Row]) {
 /// One row per session: agent, path, mtime, cwd, title.
 pub fn load_sessions() -> Vec<Row> {
     let mut rows = Rows::default();
-    name_sessions(&stores_for_names(), |path, cwd, title, line, force| {
+    name_sessions(&stores_for_names(), |path, found| {
         let row = rows.touch(path);
         if row.cwd.is_empty() {
-            row.cwd = cwd.to_string();
+            row.cwd = found.cwd;
         }
-        if (force && !title.is_empty()) || row.title.is_empty() {
-            row.title = title.to_string();
+        if (found.force && !found.title.is_empty()) || row.title.is_empty() {
+            row.title = found.title;
         }
-        if line != 0 {
-            row.line = line;
+        if found.line != 0 {
+            row.line = found.line;
         }
+        row.sub |= found.sub;
     });
     let mut rows = rows.into_vec();
     for row in &mut rows {
@@ -451,18 +478,18 @@ pub fn hydrate(rows: &mut [Row], query: &str) {
             None => by_agent.push((agent, vec![PathBuf::from(&rows[i].path)])),
         }
     }
-    let mut found: HashMap<String, (String, String)> = HashMap::new();
-    name_sessions(&by_agent, |path, cwd, title, _, force| {
-        let entry = found.entry(path.to_string()).or_default();
+    let mut named: HashMap<String, (String, String)> = HashMap::new();
+    name_sessions(&by_agent, |path, found| {
+        let entry = named.entry(path.to_string()).or_default();
         if entry.0.is_empty() {
-            entry.0 = cwd.to_string();
+            entry.0 = found.cwd;
         }
-        if (force && !title.is_empty()) || entry.1.is_empty() {
-            entry.1 = title.to_string();
+        if (found.force && !found.title.is_empty()) || entry.1.is_empty() {
+            entry.1 = found.title;
         }
     });
     for row in rows.iter_mut() {
-        let Some((cwd, title)) = found.get(&row.path) else { continue };
+        let Some((cwd, title)) = named.get(&row.path) else { continue };
         if row.cwd.is_empty() {
             row.cwd = cwd.clone();
         }
@@ -524,10 +551,9 @@ pub fn read(path: &str, head: usize, tail: usize, at: u64) -> String {
     ends(&blocks, head, tail).join("\n\n")
 }
 
-/// Drop the sessions an agent ran for itself: you cannot resume them, and they crowd out yours.
-/// claude puts them in a subagents/ directory, codex records them like any other session and
-/// says so in the header.
-pub fn drop_subagents(rows: &mut Vec<Row>) {
+/// Mark the codex sessions an agent ran for itself. Name mode learns this while it reads the
+/// headers; content mode never reads them, so it asks here.
+pub fn mark_subagents(rows: &mut [Row]) {
     let codex: Vec<PathBuf> = rows
         .iter()
         .filter(|r| r.agent == "codex")
@@ -538,7 +564,9 @@ pub fn drop_subagents(rows: &mut Vec<Row>) {
         &codex,
         &Scan { literal: false, icase: false, globs: &[], max_count: 1 },
     );
-    rows.retain(|r| !r.path.contains("/subagents/") && !sub.contains_key(&r.path));
+    for row in rows.iter_mut() {
+        row.sub |= sub.contains_key(&row.path);
+    }
 }
 
 /// Where it ran, the files it named, the record that matched, then its first and last words.
@@ -546,12 +574,12 @@ pub fn preview(path: &str, at: u64) -> String {
     let agent = agent_of(path);
     let mut cwd = String::new();
     let mut title = String::new();
-    name_sessions(&[(agent.clone(), vec![PathBuf::from(path)])], |_, found, named, _, force| {
+    name_sessions(&[(agent.clone(), vec![PathBuf::from(path)])], |_, found| {
         if cwd.is_empty() {
-            cwd = found.to_string();
+            cwd = found.cwd;
         }
-        if (force && !named.is_empty()) || title.is_empty() {
-            title = named.to_string();
+        if (found.force && !found.title.is_empty()) || title.is_empty() {
+            title = found.title;
         }
     });
 

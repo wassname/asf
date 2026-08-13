@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# Record what one build of asf prints, so the other build has an oracle to match.
+# Record what asf prints, so a change can be diffed against the build before it.
 #
-#   tests/golden.sh record python ~/.agents/skills/asf/scripts/asf
-#   tests/golden.sh record rust   target/release/asf
-#   tests/golden.sh diff                    # python against rust
-#   tests/golden.sh diff before after       # one build against its own earlier self
+#   tests/golden.sh record before target/release/asf   # then change something
+#   tests/golden.sh record after  target/release/asf
+#   tests/golden.sh diff                               # before against after
 #
-# The queries below are the ones three audits found faults with. Keep them.
+# Each query below once found a fault. Keep them.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -47,14 +46,15 @@ record() {
     echo "recorded ${#QUERIES[@]} queries to tests/golden/$name"
 }
 
-# Record both builds per query, seconds apart. A live session gets written while this runs,
-# so two full passes drift: rows move and counts differ for reasons that are not the code.
+# Record two binaries per query, seconds apart:  tests/golden.sh both /tmp/asf-old target/release/asf
+# A live session gets written while this runs, so two full passes drift and rows move for
+# reasons that are not the code.
 both() {
     for i in "${!QUERIES[@]}"; do
-        one python "$1" "$i"
-        one rust "$2" "$i"
+        one before "$1" "$i"
+        one after "$2" "$i"
     done
-    echo "recorded ${#QUERIES[@]} queries for both builds"
+    echo "recorded ${#QUERIES[@]} queries for both binaries"
 }
 
 case "${1:-diff}" in
@@ -62,7 +62,7 @@ case "${1:-diff}" in
     both) both "$2" "$3" ;;
     diff)
         fail=0
-        left="${2:-python}" right="${3:-rust}"
+        left="${2:-before}" right="${3:-after}"
         for f in tests/golden/$left/*.txt; do
             b=tests/golden/$right/$(basename "$f")
             [ -f "$b" ] || { echo "MISSING $b"; fail=1; continue; }

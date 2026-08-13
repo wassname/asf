@@ -232,13 +232,16 @@ fn main() {
         rows.retain(|r| &r.agent == agent);
     }
     if !args.sub {
-        sessions::drop_subagents(&mut rows);
+        if args.content {
+            sessions::mark_subagents(&mut rows); // name mode marked them as it read the headers
+        }
+        rows.retain(|r| !r.sub);
     }
     rows.sort_by(|a, b| b.mtime.total_cmp(&a.mtime));
 
     let total = rows.len();
     if args.pick {
-        rows.truncate(400);
+        rows.truncate(pick::ROWS);
         sessions::hydrate(&mut rows, &query);
         // the picker reruns me for its transcript search, so it needs the same filters back
         let mut filters = String::new();

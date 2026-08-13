@@ -7,6 +7,10 @@ use crate::sessions::{SOURCES, resume_for_path};
 use skim::prelude::*;
 use std::io::Cursor;
 
+/// Rows the picker holds. Every session fits: fuzzy matching a loaded row is what makes the
+/// name mode instant, and a row it never loaded is a row you cannot find.
+pub const ROWS: usize = 20000;
+
 pub fn pick(tsv: String, filters: &str, query: &str) {
     let me = std::env::current_exe()
         .expect("cannot find my own path")
@@ -18,10 +22,10 @@ pub fn pick(tsv: String, filters: &str, query: &str) {
     let mut agents = Vec::new();
     let mut legend = Vec::new();
     for (n, (agent, _)) in SOURCES.iter().enumerate() {
-        agents.push(format!("f{}:reload({me} --rows{filters} -a {agent} -n 300)", n + 1));
+        agents.push(format!("f{}:reload({me} --rows{filters} -a {agent} -n {ROWS})", n + 1));
         legend.push(format!("f{} {agent}", n + 1));
     }
-    agents.push(format!("f{}:reload({me} --rows{filters} -n 300)", SOURCES.len() + 1));
+    agents.push(format!("f{}:reload({me} --rows{filters} -n {ROWS})", SOURCES.len() + 1));
     legend.push(format!("f{} all", SOURCES.len() + 1));
 
     let reader = SkimItemReader::new(
@@ -41,7 +45,7 @@ pub fn pick(tsv: String, filters: &str, query: &str) {
         // default layout draws the list bottom-up, where page-down is a no-op at the newest row
         layout: "reverse".to_string(),
         // ctrl-q (skim's own toggle-interactive) swaps the query for this command
-        cmd: Some(format!("{me} --rows{filters} -n 300 -c '{{}}'")),
+        cmd: Some(format!("{me} --rows{filters} -n {ROWS} -c '{{}}'")),
         // ctrl-q then carries on from the name search instead of starting empty
         cmd_query: Some(query.to_string()),
         prompt: "name> ".to_string(),

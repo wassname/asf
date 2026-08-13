@@ -24,7 +24,7 @@ you can open, not a name you have to hunt for.
 ```
 <img width="1173" height="180" alt="image" src="https://github.com/user-attachments/assets/64254e7f-a91f-45e4-b22b-06e890c8e8f5" />
 
-Searching 3.4 GB of transcripts takes about a second, so there is no index to build.
+It searches with ripgrep's crates instead of an index: half a second over 3.7 GB of jsonl.
 
 ## The picker
 
@@ -45,12 +45,10 @@ Searching 3.4 GB of transcripts takes about a second, so there is no index to bu
 cargo install --path .
 ```
 
-One binary, no runtime dependencies. It links ripgrep's crates for the search and skim's
-for the picker, so there is nothing to install alongside it. Changing a dependency needs
-`cargo +nightly update`, because of the 8 day publish-age hold in `.cargo/config.toml`.
+One binary. It uses ripgrep's crates to search and skim's for the picker. A dependency
+change needs `cargo +nightly update`, for the 8 day publish-age hold in `.cargo/config.toml`.
 
-`RESEARCH_JOURNAL.md` has the rest: what each agent's store looks like, what it costs, and
-what has gone wrong.
+`RESEARCH_JOURNAL.md` has the store layouts, the search cost and the skim notes.
 
 ## Similar tools
 

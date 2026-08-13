@@ -1,91 +1,81 @@
-# asf research journal
+# asf notes
 
-What the stores actually look like, and what went wrong. Notes to whoever changes this next.
+## Session stores
 
-## 2026-08-11, the rust port
+| agent | store | id to resume with | name |
+|---|---|---|---|
+| claude | `~/.claude/projects/<cwd>/<uuid>.jsonl` | the file stem | `custom-title`, else `ai-title`, else the first message |
+| codex | `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl` | the uuid in the name, = `session_meta.payload.id` | `thread_name` in `~/.codex/session_index.jsonl`, else the first message |
+| pi | `~/.pi/agent/sessions/--<cwd>--/<ts>_<id>.jsonl` | the `id` of the first record | the first message |
+| opencode | `~/.local/share/opencode/storage/session/<hash>/ses_*.json` | the file stem | `title` in that json |
+| gemini | `~/.gemini/tmp/<project>/logs.json`, and `chats/session-*.jsonl` | none, `--resume` takes `latest` or an index | the first prompt |
+| copilot | `~/.copilot/session-state/<uuid>/events.jsonl` | the directory name | the first message |
+| hermes | `~/.hermes/state.db`, sqlite | `20260806_184450_5f121c02` | not read by asf |
 
-Reading every transcript takes about a second, so there is nothing to build and nothing to
-go stale. Stopping each file at its first hit is what keeps a common word from returning
-200k rows; a row that turns out to be harness-pasted text gets a second, deeper look.
+claude, pi and opencode scope the lookup to the working directory. 82 codex and 236 opencode
+sessions record a directory that no longer exists.
 
-Measured against 2415 sessions:
+## Format faults
 
-| query | python, shelling out to rg | rust |
-|---|---|---|
-| `asf` | 1.76 s | 0.34 s |
-| `asf steer` | 1.67 s | 0.35 s |
-| `asf -c the` | 3.28 s | 1.23 s |
-
-Build a `grep_searcher::Searcher` per file, not per worker thread. A reused Searcher loses
-hits in the files it searches later: `asf -c opencode` found 340 sessions instead of 341,
-the same one missing every run. It is the line buffer, not the binary detection. Memory
-maps avoid it, which is what ripgrep does, but they measured slower here (1.75 s against
-1.05 s).
-
-`Cargo.lock` is committed, and `.cargo/config.toml` refuses any crate version published in
-the last 8 days. That is cargo's own
-[min-publish-age](https://doc.rust-lang.org/nightly/cargo/reference/unstable.html#min-publish-age),
-nightly-only for now, so `cargo +nightly update` resolves and `cargo build --locked` builds.
-With the hold off, 23 of these dependencies would move today, one of them published
-yesterday. Do not remove it to make an update go through: wait, or add a scoped exception
-for the one crate.
-
-## What the format knowledge is worth
-
-The faults audits found in real stores. They are the value of the tool, not the code around
-them.
-
-- codex stores your `AGENTS.md` in a `world_state` record in every transcript, so a search
-  for a phrase that only exists in that file matched 411 sessions
+- codex writes your `AGENTS.md` into a `world_state` record in every transcript. A search for
+  a phrase that only exists in that file matched 411 sessions
 - claude pastes its skill list into every session as an `attachment` record
 - claude files a tool result as a user turn, marked `toolUseResult`
-- claude's `/rename` writes a `custom-title` record, repeated, so the last one is the name
-- a codex thread name is in `~/.codex/session_index.jsonl`, not in the rollout
-- 320 of 549 codex rollouts are subagent runs: `"source":{"subagent":...}` in the header
-- a pi filename truncates the id at an underscore; read the `id` of the first record
-- copilot's id is the directory holding `events.jsonl`, not the file
-- an opencode session is not a file: it is `storage/message/<ses>/` plus
-  `storage/part/<msg>/`, and its metadata file holds only a title
-- gemini writes half its session files as `.json` and half as `.jsonl`, plus one
-  `logs.json` of prompts per project
+- claude repeats the `custom-title` record, so the last one is the current name
+- 320 of 549 codex rollouts are subagent runs, marked `"source":{"subagent":...}` in the header
+- a pi filename truncates the id at the last underscore, and 8 of 1216 filename uuids are not
+  the id pi answers to
+- an opencode session is not one file. It is `storage/message/<ses>/` plus
+  `storage/part/<msg>/`, and the session json holds only a title
+- gemini writes some session files as `.json` and some as `.jsonl`, plus one `logs.json` of
+  prompts per project
 - copilot labels turns `user.message` and `assistant.message`, with no `role` key
-- hermes and Cursor are not supported: they keep sessions in sqlite, not in files
 
-## 2026-08-13, driving skim as a library
+## Search cost
 
-`reload(cmd {q})` hands those two characters to the shell instead of the query, so only
-interactive mode (`cmd` with `cmd_prompt`) can carry one. The default layout draws the list
-bottom-up from the newest row, where page-down has nowhere to go, so `layout` has to be
-`reverse`. `tests/drive.py` renders the picker in a pty, so a key binding can be checked
-without a person at a terminal.
+2036 sessions, 3.7 GB, nvme. Each file stops at its first hit, which is what keeps a common
+word from returning 200k rows.
 
-## Reading another agent's sqlite
+| query | |
+|---|---|
+| `asf` | 0.47 s |
+| `asf -c the` | 1.6 s |
+| `asf -c "profile ships in a staging"` | 0.80 s |
 
-If you add a sqlite source, copy [recall](https://github.com/pratikgajjar/recall)'s care, not
-just its schema. Its [cursor.go](https://github.com/pratikgajjar/recall/blob/main/cursor.go)
-warns that a bare `path?params` DSN "is silently opened read-write and CHECKPOINTS a WAL
-database on close, mutating the user's source data". Use the `file:` URI form with `mode=ro`,
-and not `immutable=1` on a live agent's database: codex's `state_5.sqlite` carries a 4.1 MB
-write-ahead log here, and `immutable=1` skips it, reporting 537 threads where `mode=ro`
-reported 539.
+Build a `grep_searcher::Searcher` per file, not per worker thread. A reused Searcher loses
+hits in the files it searches later: `asf -c opencode` found 340 sessions instead of 341, the
+same one missing every run. The cause is the line buffer, not the binary detection. Memory
+maps avoid it, and measured slower here, 1.75 s against 1.05 s.
 
-## The golden queries
+Read a header once. Testing that same record for `"subagent"` costs nothing; a second scan of
+the codex store to find the same thing doubled `asf` to 0.85 s.
 
-`tests/golden.sh` records what one build prints for 20 queries and diffs two recordings. The
-queries are the ones the audits found faults with, so do not trim them.
+## skim as a library
+
+- `reload(cmd {q})` passes the two characters `{q}` to the shell, not the query. Only
+  interactive mode, `cmd` with `cmd_prompt`, substitutes it
+- the default layout draws the list bottom-up from the newest row, so page-down does nothing.
+  Set `layout` to `reverse`
+- `SkimOptions::with_nth` is dead in library mode. The one on `SkimItemReaderOption` is what
+  works, and it keeps the full line in `output()`
+- there is no `change-header` action, so the mode has to show in the prompt
+- `tests/drive.py` renders the picker in a pty, so a key binding can be checked without a
+  person at a terminal
+
+## sqlite
+
+Open another agent's database with the `file:` URI form and `mode=ro`. Not `immutable=1`,
+which skips the write-ahead log: codex's `state_5.sqlite` has a 4.1 MB log, and `immutable=1`
+reported 537 threads where `mode=ro` reported 539.
+
+## Regression check
 
 ```sh
 tests/golden.sh record before target/release/asf   # then change something
 tests/golden.sh record after  target/release/asf
-tests/golden.sh diff before after
+tests/golden.sh diff
 ```
 
-Record both within minutes: the corpus grows as you work, so an older recording differs for
-reasons that have nothing to do with the code. The recordings stay out of git, because they
-hold real session names and paths.
+Each of the 20 queries once found a fault. Do not trim them.
 
-Open question. The python build at `~/.agents/skills/asf/scripts/asf` was the oracle for the
-rust port, and 12 of the 20 queries now differ from it, all from hiding codex subagent
-rollouts and from reading the names people typed. Either port those two to it or drop it.
-
--- Claude
+-- notes by Claude
