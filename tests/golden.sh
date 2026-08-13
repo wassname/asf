@@ -3,7 +3,8 @@
 #
 #   tests/golden.sh record python ~/.agents/skills/asf/scripts/asf
 #   tests/golden.sh record rust   target/release/asf
-#   tests/golden.sh diff
+#   tests/golden.sh diff                    # python against rust
+#   tests/golden.sh diff before after       # one build against its own earlier self
 #
 # The queries below are the ones three audits found faults with. Keep them.
 set -uo pipefail
@@ -61,8 +62,9 @@ case "${1:-diff}" in
     both) both "$2" "$3" ;;
     diff)
         fail=0
-        for f in tests/golden/python/*.txt; do
-            b=tests/golden/rust/$(basename "$f")
+        left="${2:-python}" right="${3:-rust}"
+        for f in tests/golden/$left/*.txt; do
+            b=tests/golden/$right/$(basename "$f")
             [ -f "$b" ] || { echo "MISSING $b"; fail=1; continue; }
             # sorted: a session written while this runs moves rank between the two reads,
             # so compare the set of rows, not their order
