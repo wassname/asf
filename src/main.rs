@@ -22,7 +22,17 @@ use std::path::Path;
 #[derive(Parser)]
 #[command(
     name = "asf",
-    about = "Find a past coding-agent session by name, or by anything said inside it"
+    about = "Find a past coding-agent session by name, or by anything said inside it",
+    after_help = "\
+Name search, the default, matches the session's own name, its project, and the first thing
+you said. Content search, -c, reads every message, what the assistant said and what tools
+printed included. Both take a literal phrase and ignore case; --re opts into a pattern.
+
+A name is whichever the agent kept: the one you typed (claude /rename, a codex thread name,
+a pi --session-id), then the one its UI shows, then your opening message.
+
+Runs an agent started for itself are hidden, because you cannot resume them. --sub shows them.
+The picker prints its own keys. README.md and RESEARCH_JOURNAL.md have the rest."
 )]
 struct Args {
     /// words to look for. Empty lists the newest sessions.
