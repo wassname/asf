@@ -16,8 +16,6 @@ mod scan;
 mod sessions;
 
 use clap::Parser;
-use jiff::Timestamp;
-use jiff::tz::TimeZone;
 use sessions::{Row, SOURCES};
 use std::path::Path;
 
@@ -73,14 +71,6 @@ struct Args {
     line: u64,
 }
 
-fn day(mtime: f64, format: &str) -> String {
-    Timestamp::from_second(mtime as i64)
-        .expect("mtime out of range")
-        .to_zoned(TimeZone::system())
-        .strftime(format)
-        .to_string()
-}
-
 fn project(row: &Row) -> String {
     if !row.cwd.is_empty() {
         return Path::new(&row.cwd)
@@ -104,14 +94,24 @@ fn or_dash(text: &str, width: usize) -> String {
     if short.is_empty() { "-".to_string() } else { short }
 }
 
-fn table(rows: &[Row], matched: bool) -> String {
+/// The column beside the name: why the row matched, or what you opened the session with.
+fn said(row: &Row) -> &str {
+    if !row.matched.is_empty() {
+        return &row.matched;
+    }
+    // a name replaced the opening message in the title, so there is room to show both
+    if row.opening != row.title { &row.opening } else { "" }
+}
+
+fn table(rows: &[Row], content: bool) -> String {
     let home = sessions::home().to_string_lossy().into_owned();
+    let matched = rows.iter().any(|r| !said(r).is_empty());
     let mut head: Vec<String> = ["when", "agent", "project", "name"]
         .iter()
         .map(|h| h.to_string())
         .collect();
     if matched {
-        head.push("match".to_string());
+        head.push(if content { "match" } else { "opening" }.to_string());
     }
     head.push("file".to_string());
 
@@ -119,13 +119,13 @@ fn table(rows: &[Row], matched: bool) -> String {
         .iter()
         .map(|r| {
             let mut cells = vec![
-                day(r.mtime, "%Y-%m-%d"),
+                sessions::day(r.mtime, "%Y-%m-%d"),
                 r.agent.clone(),
                 record::cut(&project(r), 20),
                 or_dash(&r.title, 60),
             ];
             if matched {
-                cells.push(or_dash(&r.matched, 60));
+                cells.push(or_dash(said(r), 60));
             }
             cells.push(r.path.replace(&home, "~"));
             cells
@@ -160,19 +160,28 @@ fn table(rows: &[Row], matched: bool) -> String {
     lines.join("\n")
 }
 
+/// One padded block for the eye, then the path and line for the preview and for resuming.
 fn rows_tsv(rows: &[Row]) -> String {
     rows.iter()
         .map(|r| {
-            [
-                day(r.mtime, "%m-%d"),
+            let cells = [
+                sessions::day(r.mtime, "%m-%d"),
                 r.agent.clone(),
-                record::cut(&project(r), 18),
+                project(r),
                 or_dash(&r.title, 60),
-                or_dash(&r.matched, 70),
-                if r.hit.is_empty() { r.path.clone() } else { r.hit.clone() },
-                r.line.to_string(),
-            ]
-            .join("\t")
+                or_dash(said(r), 70),
+            ];
+            let shown: Vec<String> = cells
+                .iter()
+                .zip(pick::COLUMNS)
+                .map(|(cell, (_, width))| format!("{:width$}", record::cut(cell, width)))
+                .collect();
+            format!(
+                "{}\t{}\t{}",
+                shown.join(" "),
+                if r.hit.is_empty() { &r.path } else { &r.hit },
+                r.line
+            )
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -217,8 +226,13 @@ fn main() {
                     std::process::exit(1);
                 }
             };
+            // the opening message too: a name is what the agent called the session, and you
+            // are more likely to remember what you asked for
             rows.retain(|r| {
-                pattern.is_match(&r.title) || pattern.is_match(&r.path) || pattern.is_match(&r.cwd)
+                pattern.is_match(&r.title)
+                    || pattern.is_match(&r.opening)
+                    || pattern.is_match(&r.path)
+                    || pattern.is_match(&r.cwd)
             });
         }
         rows

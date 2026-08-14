@@ -57,6 +57,8 @@ pub struct Row {
     pub cwd: String,
     pub title: String,
     pub matched: String,
+    /// the first thing you said, kept even when a name replaces it in the title
+    pub opening: String,
     pub raw: String,
     pub mtime: f64,
     pub line: u64,
@@ -349,11 +351,13 @@ pub fn load_sessions() -> Vec<Row> {
         if row.cwd.is_empty() {
             row.cwd = found.cwd;
         }
+        if found.line != 0 {
+            // only the first-message pass reports a line, and that message is the opening
+            row.line = found.line;
+            row.opening = found.title.clone();
+        }
         if (found.force && !found.title.is_empty()) || row.title.is_empty() {
             row.title = found.title;
-        }
-        if found.line != 0 {
-            row.line = found.line;
         }
         row.sub |= found.sub;
     });
@@ -370,6 +374,14 @@ pub fn load_sessions() -> Vec<Row> {
     }
     typed_names(&mut rows);
     rows
+}
+
+pub fn day(mtime: f64, format: &str) -> String {
+    jiff::Timestamp::from_second(mtime as i64)
+        .expect("mtime out of range")
+        .to_zoned(jiff::tz::TimeZone::system())
+        .strftime(format)
+        .to_string()
 }
 
 pub fn mtime(path: &str) -> f64 {
@@ -585,14 +597,18 @@ pub fn preview(path: &str, at: u64) -> String {
         }
     });
 
-    let mut out = vec![format!("{agent}  {}", if cwd.is_empty() { path } else { &cwd })];
-    if !title.is_empty() {
-        out.push(clean(&title, 200));
-    }
     let files = files_named(path);
+    let label = |name: &str, value: String| format!("\x1b[2m{name:7}\x1b[0m{value}");
+    let mut out = vec![
+        label("client", agent.clone()),
+        label("date", day(mtime(path), "%Y-%m-%d %H:%M")),
+        label("name", clean(&title, 200)),
+        label("dir", if cwd.is_empty() { path.to_string() } else { cwd.clone() }),
+    ];
     if !files.is_empty() {
-        out.push(cut(&format!("files: {}", files.join(" ")), 220));
+        out.push(label("files", cut(&files.join(" "), 220)));
     }
+    out.push(label("file", path.replace(&home().to_string_lossy().to_string(), "~")));
     let said = blocks(path, 0);
     let matched = if at == 0 { String::new() } else { read(path, 0, 0, at) };
     // in name mode the match IS the first message, and printing it twice wastes the pane
@@ -602,7 +618,12 @@ pub fn preview(path: &str, at: u64) -> String {
     }
     out.push(String::new());
     for block in ends(&said, 2, 6) {
-        out.push(cut(&block, 700));
+        // the pane renders ansi, so the role lines can carry the structure
+        let shown = cut(&block, 700);
+        out.push(match shown.split_once('\n') {
+            Some((role, body)) => format!("\x1b[1m{role}\x1b[0m\n{body}"),
+            None => shown,
+        });
     }
     out.join("\n")
 }
@@ -638,7 +659,7 @@ fn blocks(path: &str, at: u64) -> Vec<String> {
         // opencode: a session is a directory of shards
         return opencode_transcript(path);
     }
-    let mut blocks = Vec::new();
+    let mut blocks: Vec<String> = Vec::new();
     let raw = std::fs::read(path).unwrap_or_default();
     for (index, line) in String::from_utf8_lossy(&raw).split('\n').enumerate() {
         let line_no = index as u64 + 1;
@@ -646,6 +667,12 @@ fn blocks(path: &str, at: u64) -> Vec<String> {
             continue;
         }
         let Some(block) = block(line, at != 0) else { continue };
+        // a resent prompt is filed twice, once cut short, so keep whichever says more
+        match blocks.last() {
+            Some(last) if block.starts_with(last.as_str()) => drop(blocks.pop()),
+            Some(last) if last.starts_with(&block) => continue,
+            _ => {}
+        }
         blocks.push(block);
     }
     if blocks.is_empty() {
@@ -664,8 +691,11 @@ fn blocks(path: &str, at: u64) -> Vec<String> {
 /// One record as `--- role ---\nwhat was said`; `verbatim` keeps preambles and tool calls too.
 fn block(line: &str, verbatim: bool) -> Option<String> {
     let entry = parse(line)?;
-    if entry.get("toolUseResult").is_some() && !verbatim {
-        return None; // claude files a tool result as a user turn
+    if !verbatim
+        && (entry.get("toolUseResult").is_some() || entry.get("isMeta") == Some(&Value::Bool(true)))
+    {
+        // claude files a tool result as a user turn, and echoes the prompt as an isMeta one
+        return None;
     }
     let role = role_of(&entry);
     let said: Vec<String> = texts(&entry)

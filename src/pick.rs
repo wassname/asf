@@ -8,6 +8,18 @@ use std::io::Cursor;
 /// name mode instant, and a row it never loaded is a row you cannot find.
 pub const ROWS: usize = 20000;
 
+/// The row, padded to fixed widths so the header lines up with it.
+pub const COLUMNS: [(&str, usize); 5] =
+    [("when", 5), ("agent", 8), ("project", 16), ("name", 36), ("opening", 50)];
+
+pub fn header_row() -> String {
+    COLUMNS
+        .iter()
+        .map(|(label, width)| format!("{label:width$}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 pub fn pick(tsv: String, filters: &str, query: &str) {
     let me = std::env::current_exe()
         .expect("cannot find my own path")
@@ -29,7 +41,7 @@ pub fn pick(tsv: String, filters: &str, query: &str) {
         SkimItemReaderOption::default()
             .ansi(true)
             .delimiter("\t")
-            .with_nth(["1", "2", "3", "4", "5"].into_iter()),
+            .with_nth(["1"].into_iter()),
     );
     let collector = Rc::new(RefCell::new(reader));
     let items = collector.borrow().of_bufread(Cursor::new(tsv));
@@ -41,13 +53,18 @@ pub fn pick(tsv: String, filters: &str, query: &str) {
         expect: vec!["alt-p".to_string()],
         // default layout draws the list bottom-up, where page-down is a no-op at the newest row
         layout: "reverse".to_string(),
+        // rows arrive newest first, and that beats a fuzzy score: you are usually after a
+        // session from this week, not the one whose name matches most tightly
+        tiebreak: vec![RankCriteria::Index],
+        // substring, like the command line. Scattered fuzzy hits turned "intercom" into 42 rows
+        exact: true,
         // ctrl-q (skim's own toggle-interactive) swaps the query for this command
         cmd: Some(format!("{me} --rows{filters} -n {ROWS} -c '{{}}'")),
         // ctrl-q then carries on from the name search instead of starting empty
         cmd_query: Some(query.to_string()),
         prompt: "name> ".to_string(),
         cmd_prompt: "transcript> ".to_string(),
-        preview: Some(format!("{me} --preview {{6}} --line {{7}}")),
+        preview: Some(format!("{me} --preview {{2}} --line {{3}}")),
         preview_window: "down:65%:wrap".to_string(),
         bind: [
             agents,
@@ -58,8 +75,9 @@ pub fn pick(tsv: String, filters: &str, query: &str) {
         ]
         .concat(),
         header: Some(format!(
-            "enter resume  alt-p path  ctrl-q name<->transcript  alt-up/down preview\n{}",
-            legend.join("  ")
+            "enter resume  alt-p path  ctrl-q name<->transcript  alt-up/down preview\n{}\n{}",
+            legend.join("  "),
+            header_row()
         )),
         cmd_collector: collector.clone(),
         ..Default::default()
@@ -71,13 +89,13 @@ pub fn pick(tsv: String, filters: &str, query: &str) {
     }
     let Some(chosen) = out.selected_items.first() else { return };
     let fields: Vec<String> = chosen.output().split('\t').map(str::to_string).collect();
-    if fields.len() < 6 {
+    if fields.len() < 3 {
         return;
     }
     if out.final_key == Key::Alt('p') {
-        println!("{}", fields[5]);
+        println!("{}", fields[1]);
         return;
     }
     // read the session fresh: after a transcript search these rows are ones the caller never scanned
-    println!("{}", resume_for_path(&fields[5]));
+    println!("{}", resume_for_path(&fields[1]));
 }
