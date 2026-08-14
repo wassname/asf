@@ -313,8 +313,17 @@ fn stores_for_names() -> Vec<(String, Vec<PathBuf>)> {
     stores
 }
 
-/// A codex thread you named keeps that name in codex's own index, not in the rollout.
-fn named_threads(rows: &mut [Row]) {
+/// The name you typed, where the transcript itself does not hold it. codex keeps a thread
+/// name in its own index; a pi session you started with `--session-id <name>` is named by its
+/// own file, and only a generated session gets a uuid there.
+fn typed_names(rows: &mut [Row]) {
+    for row in rows.iter_mut().filter(|r| r.agent == "pi") {
+        let stem = Path::new(&row.path).file_stem().unwrap_or_default().to_string_lossy();
+        let Some((_, id)) = stem.split_once('_') else { continue };
+        if UUID.find(id).is_none() {
+            row.title = id.to_string();
+        }
+    }
     if !rows.iter().any(|r| r.agent == "codex") {
         return;
     }
@@ -359,7 +368,7 @@ pub fn load_sessions() -> Vec<Row> {
         }
         row.mtime = mtime(&row.path);
     }
-    named_threads(&mut rows);
+    typed_names(&mut rows);
     rows
 }
 
@@ -497,7 +506,7 @@ pub fn hydrate(rows: &mut [Row], query: &str) {
             row.title = title.clone();
         }
     }
-    named_threads(rows);
+    typed_names(rows);
 }
 
 fn opencode_messages(session_json: &str) -> Vec<(PathBuf, Vec<PathBuf>)> {
