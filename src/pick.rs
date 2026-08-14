@@ -10,7 +10,7 @@ pub const ROWS: usize = 20000;
 
 /// The row, padded to fixed widths so the header lines up with it.
 pub const COLUMNS: [(&str, usize); 5] =
-    [("when", 5), ("agent", 8), ("project", 16), ("name", 36), ("opening", 50)];
+    [("when", 16), ("agent", 8), ("project", 16), ("name", 36), ("opening", 44)];
 
 pub fn header_row() -> String {
     COLUMNS
