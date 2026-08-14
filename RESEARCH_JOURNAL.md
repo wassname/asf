@@ -4,7 +4,7 @@
 
 | agent | store | id to resume with | name |
 |---|---|---|---|
-| claude | `~/.claude/projects/<cwd>/<uuid>.jsonl` | the file stem | `custom-title`, else `ai-title`, else the first message |
+| claude | `~/.claude/projects/<cwd>/<uuid>.jsonl` | the file stem | `agent-name`, else `custom-title`, else `ai-title`, else the first message |
 | codex | `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl` | the uuid in the name, = `session_meta.payload.id` | `thread_name` in `~/.codex/session_index.jsonl`, else the first message |
 | pi | `~/.pi/agent/sessions/--<cwd>--/<ts>_<id>.jsonl` | the `id` of the first record | the first message |
 | opencode | `~/.local/share/opencode/storage/session/<hash>/ses_*.json` | the file stem | `title` in that json |
@@ -21,8 +21,16 @@ sessions record a directory that no longer exists.
   a phrase that only exists in that file matched 411 sessions
 - claude pastes its skill list into every session as an `attachment` record
 - claude files a tool result as a user turn, marked `toolUseResult`
-- claude repeats the `custom-title` record, so the last one is the current name
+- claude writes three name records, `ai-title`, `custom-title` and `agent-name`, and rewrites
+  each as the session goes on without removing the old copy. One session held 18 `aiTitle`
+  records saying "Integrate pi-intercom with Matrix or Telegram" and 385 later ones saying
+  "pi-supervise-intercom-rebuild", so the first hit in the file is the wrong name. `agent-name`
+  is the one its UI shows: it equals `customTitle` after a `/rename` and `aiTitle` otherwise.
+  Of 143 files with a name, 99 predate `agent-name` and still need the other two
 - 320 of 549 codex rollouts are subagent runs, marked `"source":{"subagent":...}` in the header
+- pi records nothing about who started a session. Its own sessions get a uuidv7; only
+  `--session-id` gives one a name, and only a tool passes that, so 25 of 1260 pi sessions are
+  spawned reviewers (`rev-*`, `oracle-*`, `panel-*`). A session you name by hand looks the same
 - a pi filename truncates the id at the last underscore, and 8 of 1216 filename uuids are not
   the id pi answers to
 - an opencode session is not one file. It is `storage/message/<ses>/` plus

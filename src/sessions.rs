@@ -28,8 +28,9 @@ const RESUME: [(&str, &str); 5] = [
     ("copilot", "copilot --resume={sid}"),
 ];
 
-/// what claude writes when you /rename a session
-const RENAMED: &str = r#""type":"custom-title""#;
+/// the three records claude writes for a session's name; TITLE_FIELDS is their order of rank
+const TITLES: &str = r#""type":"(ai-title|custom-title|agent-name)""#;
+const TITLE_FIELDS: [&str; 3] = ["aiTitle", "customTitle", "agentName"];
 
 /// (first user message, session header) per agent. The header carries the working directory.
 const NAME_PATTERNS: [(&str, &str, &str); 5] = [
@@ -223,9 +224,14 @@ where
         let found = NAME_PATTERNS.iter().find(|(a, _, _)| a == agent);
         if let Some((_, _, header)) = found.filter(|(_, _, h)| !h.is_empty()) {
             for (path, hits) in names(header, paths, 1) {
-                let cwd = parse(&hits[0].text).map_or(String::new(), |e| find_value(&e, "cwd"));
-                // codex records a run it started for itself like any other session
-                let sub = hits[0].text.contains(r#""subagent""#);
+                let header = parse(&hits[0].text);
+                let cwd = header.as_ref().map_or(String::new(), |e| find_value(e, "cwd"));
+                // codex records a run it started for itself like any other session.
+                // pi records nothing, but its own sessions get a uuid, and only a program
+                // passes --session-id, so a named pi session is one a tool started.
+                let sub = hits[0].text.contains(r#""subagent""#)
+                    || (agent == "pi"
+                        && header.map_or(false, |e| UUID.find(&find_value(&e, "id")).is_none()));
                 add(&path, Found { cwd, sub, ..Found::default() });
             }
         }
@@ -237,19 +243,20 @@ where
             }
         }
         if agent == "claude" {
-            // the name claude's own UI shows beats the first message
-            for (path, hits) in names(r#""type":"ai-title""#, paths, 1) {
-                let title = parse(&hits[0].text)
-                    .map_or(String::new(), |e| find_value(&e, "aiTitle"));
-                add(&path, Found { title: clean(&title, 110), force: true, ..Found::default() });
-            }
-            // /rename beats both, and repeats the record, so take the last one in the file.
-            // Two passes: find the few files that were renamed, then read those in full.
-            let renamed: Vec<PathBuf> =
-                names(RENAMED, paths, 1).keys().map(PathBuf::from).collect();
-            for (path, hits) in names(RENAMED, &renamed, usize::MAX) {
-                let title = parse(&hits[hits.len() - 1].text)
-                    .map_or(String::new(), |e| find_value(&e, "customTitle"));
+            // a name beats the first message. Each record is rewritten as the session goes
+            // on and the old ones stay in the file, so the last of its kind is the live one.
+            for (path, hits) in names(TITLES, paths, usize::MAX) {
+                let mut title = String::new();
+                for field in TITLE_FIELDS {
+                    let key = format!("\"{field}\"");
+                    let Some(last) = hits.iter().rev().find(|h| h.text.contains(&key)) else {
+                        continue;
+                    };
+                    let found = parse(&last.text).map_or(String::new(), |e| find_value(&e, field));
+                    if !found.is_empty() {
+                        title = found;
+                    }
+                }
                 add(&path, Found { title: clean(&title, 110), force: true, ..Found::default() });
             }
         }

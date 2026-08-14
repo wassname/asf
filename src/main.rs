@@ -29,9 +29,12 @@ you said. Content search, -c, reads every message, what the assistant said and w
 printed included. Both take a literal phrase and ignore case; --re opts into a pattern.
 
 A name is whichever the agent kept: the one you typed (claude /rename, a codex thread name,
-a pi --session-id), then the one its UI shows, then your opening message.
+a pi --session-id), then the one its UI shows, then your opening message. Where a session was
+renamed part way through, this is the name it ended with.
 
 Runs an agent started for itself are hidden, because you cannot resume them. --sub shows them.
+For pi that means every session with a name, since pi gives its own a uuid and only a tool
+passes --session-id.
 The picker prints its own keys. README.md and RESEARCH_JOURNAL.md have the rest."
 )]
 struct Args {
@@ -129,7 +132,7 @@ fn table(rows: &[Row], content: bool) -> String {
         .iter()
         .map(|r| {
             let mut cells = vec![
-                sessions::day(r.mtime, "%Y-%m-%d"),
+                sessions::day(r.mtime, "%Y-%m-%d %H:%M"),
                 r.agent.clone(),
                 record::cut(&project(r), 20),
                 or_dash(&r.title, 60),
@@ -175,7 +178,7 @@ fn rows_tsv(rows: &[Row]) -> String {
     rows.iter()
         .map(|r| {
             let cells = [
-                sessions::day(r.mtime, "%m-%d"),
+                sessions::day(r.mtime, "%Y-%m-%d %H:%M"),
                 r.agent.clone(),
                 project(r),
                 or_dash(&r.title, 60),
