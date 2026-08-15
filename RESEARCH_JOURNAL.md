@@ -27,6 +27,10 @@ sessions record a directory that no longer exists.
   "pi-supervise-intercom-rebuild", so the first hit in the file is the wrong name. `agent-name`
   is the one its UI shows: it equals `customTitle` after a `/rename` and `aiTitle` otherwise.
   Of 143 files with a name, 99 predate `agent-name` and still need the other two
+- six agents spell a tool call six ways: claude `tool_use`, codex `function_call` and
+  `custom_tool_call` (1615 of the latter against 622 of the former in one rollout), pi
+  `"role":"toolCall"`, opencode `tool` with args and output together under `state`, copilot
+  `tool.execution_start`. `--tools` matches the letters of the type or role, not the spelling
 - 320 of 549 codex rollouts are subagent runs, marked `"source":{"subagent":...}` in the header
 - pi records nothing about who started a session. Its own sessions get a uuidv7; only
   `--session-id` gives one a name, and only a tool passes that, so 25 of 1260 pi sessions are
