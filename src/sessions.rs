@@ -545,7 +545,7 @@ fn opencode_messages(session_json: &str) -> Vec<(PathBuf, Vec<PathBuf>)> {
 }
 
 /// opencode splits a session over storage/message/<ses>/ and storage/part/<msg>/.
-fn opencode_transcript(session_json: &str) -> Vec<String> {
+fn opencode_transcript(session_json: &str, show: Show) -> Vec<String> {
     let mut blocks = Vec::new();
     for (message, parts) in opencode_messages(session_json) {
         let meta = read_json(&message).unwrap_or(Value::Null);
@@ -553,11 +553,11 @@ fn opencode_transcript(session_json: &str) -> Vec<String> {
         let said: Vec<String> = parts
             .iter()
             .filter_map(|p| read_json(p))
-            .flat_map(|p| texts(&p))
+            .flat_map(|p| texts(&p).into_iter().chain(extras(&p, show)))
             .filter(|t| !t.trim().is_empty())
             .collect();
         if !said.is_empty() {
-            blocks.push(format!("--- {role} ---\n{}", said.join("\n")));
+            blocks.push(format!("## {role}\n{}", said.join("\n")));
         }
     }
     blocks
@@ -567,8 +567,8 @@ fn opencode_transcript(session_json: &str) -> Vec<String> {
 ///
 /// `at` prints only the record on that line, which is what the picker previews. Otherwise
 /// only the conversation: tool calls, their results and the harness preambles are dropped.
-pub fn read(path: &str, head: usize, tail: usize, at: u64) -> String {
-    let blocks = blocks(path, at);
+pub fn read(path: &str, head: usize, tail: usize, at: u64, show: Show) -> String {
+    let blocks = blocks(path, at, show);
     ends(&blocks, head, tail).join("\n\n")
 }
 
@@ -616,8 +616,9 @@ pub fn preview(path: &str, at: u64) -> String {
         out.push(label("files", cut(&files.join(" "), 220)));
     }
     out.push(label("file", path.replace(&home().to_string_lossy().to_string(), "~")));
-    let said = blocks(path, 0);
-    let matched = if at == 0 { String::new() } else { read(path, 0, 0, at) };
+    let said = blocks(path, 0, Show::default());
+    let matched =
+        if at == 0 { String::new() } else { read(path, 0, 0, at, Show::default()) };
     // in name mode the match IS the first message, and printing it twice wastes the pane
     if !matched.is_empty() && said.first() != Some(&matched) {
         out.push(format!("--- match, line {at} ---"));
@@ -660,11 +661,11 @@ fn files_named(path: &str) -> Vec<String> {
 }
 
 /// One block per message, in order.
-fn blocks(path: &str, at: u64) -> Vec<String> {
+fn blocks(path: &str, at: u64, show: Show) -> Vec<String> {
     let stem = Path::new(path).file_stem().unwrap_or_default().to_string_lossy().to_string();
     if stem.starts_with("ses_") {
         // opencode: a session is a directory of shards
-        return opencode_transcript(path);
+        return opencode_transcript(path, show);
     }
     let mut blocks: Vec<String> = Vec::new();
     let raw = std::fs::read(path).unwrap_or_default();
@@ -673,7 +674,7 @@ fn blocks(path: &str, at: u64) -> Vec<String> {
         if at != 0 && line_no != at {
             continue;
         }
-        let Some(block) = block(line, at != 0) else { continue };
+        let Some(block) = block(line, at != 0, show) else { continue };
         // a resent prompt is filed twice, once cut short, so keep whichever says more
         match blocks.last() {
             Some(last) if block.starts_with(last.as_str()) => drop(blocks.pop()),
@@ -695,30 +696,32 @@ fn blocks(path: &str, at: u64) -> Vec<String> {
     blocks
 }
 
-/// One record as `--- role ---\nwhat was said`; `verbatim` keeps preambles and tool calls too.
-fn block(line: &str, verbatim: bool) -> Option<String> {
+/// One record as `## role\nwhat was said`; `verbatim` keeps preambles and tool calls too.
+fn block(line: &str, verbatim: bool, show: Show) -> Option<String> {
     let entry = parse(line)?;
-    if !verbatim
-        && (entry.get("toolUseResult").is_some() || entry.get("isMeta") == Some(&Value::Bool(true)))
-    {
-        // claude files a tool result as a user turn, and echoes the prompt as an isMeta one
+    // claude files a tool result as a user turn, and echoes the prompt as an isMeta one
+    let result = entry.get("toolUseResult").is_some() && !show.tools;
+    if !verbatim && (result || entry.get("isMeta") == Some(&Value::Bool(true))) {
         return None;
     }
-    let role = role_of(&entry);
+    // claude files a tool result under the user's role, which reads as the user talking
+    let role =
+        if entry.get("toolUseResult").is_some() { "tool".to_string() } else { role_of(&entry) };
     let said: Vec<String> = texts(&entry)
         .into_iter()
         .filter(|t| !t.trim().is_empty())
         .filter(|t| verbatim || !is_junk(t))
+        .chain(extras(&entry, show))
         .collect();
     let mut body = said.join("\n");
     if verbatim && body.is_empty() {
         // the match landed in a tool call; show the record itself
         body = cut(&serde_json::to_string_pretty(&entry).unwrap_or_default(), 4000);
     }
-    if body.is_empty() || !(verbatim || role == "user" || role == "assistant") {
+    if body.is_empty() || !(verbatim || ["user", "assistant", "tool"].contains(&role.as_str())) {
         return None;
     }
-    Some(format!("--- {role} ---\n{body}"))
+    Some(format!("## {role}\n{body}"))
 }
 
 /// The first `head` and last `tail` blocks, with a marker for the dropped middle. 0,0 is all.
@@ -727,7 +730,7 @@ fn ends(blocks: &[String], head: usize, tail: usize) -> Vec<String> {
         return blocks.to_vec();
     }
     let mut kept: Vec<String> = blocks[..head].to_vec();
-    kept.push(format!("--- {} messages ---", blocks.len() - head - tail));
+    kept.push(format!("## ... {} messages ...", blocks.len() - head - tail));
     kept.extend_from_slice(&blocks[blocks.len() - tail..]);
     kept
 }

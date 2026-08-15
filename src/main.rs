@@ -35,6 +35,9 @@ renamed part way through, this is the name it ended with.
 Runs an agent started for itself are hidden, because you cannot resume them. --sub shows them.
 For pi that means every session with a name, since pi gives its own a uuid and only a tool
 passes --session-id.
+--read exports the session as markdown, `## role` a message, the conversation only. --tools
+and --think put the tool calls and the reasoning back, a line each; --head and --tail cut it.
+
 The picker prints its own keys. README.md and RESEARCH_JOURNAL.md have the rest."
 )]
 struct Args {
@@ -79,6 +82,12 @@ struct Args {
     /// with --read, only the last N messages
     #[arg(long, default_value_t = 0)]
     tail: usize,
+    /// with --read, keep the tool calls and their results, a line each
+    #[arg(long)]
+    tools: bool,
+    /// with --read, keep the reasoning blocks, quoted
+    #[arg(long)]
+    think: bool,
     /// with --read or --preview, the record on that line
     #[arg(long, default_value_t = 0)]
     line: u64,
@@ -205,7 +214,8 @@ fn main() {
     let args = Args::parse();
 
     if let Some(path) = &args.read {
-        println!("{}", sessions::read(path, args.head, args.tail, args.line));
+        let show = record::Show { tools: args.tools, think: args.think };
+        println!("{}", sessions::read(path, args.head, args.tail, args.line, show));
         return;
     }
     if let Some(path) = &args.preview {

@@ -101,6 +101,58 @@ pub fn texts(entry: &Value) -> Vec<String> {
     found
 }
 
+/// What `texts` drops on purpose, for the markdown export.
+#[derive(Clone, Copy, Default)]
+pub struct Show {
+    pub tools: bool,
+    pub think: bool,
+}
+
+/// The tool calls and the reasoning of one record, a line each.
+pub fn extras(entry: &Value, show: Show) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut stack = vec![entry];
+    while let Some(node) = stack.pop() {
+        match node {
+            Value::Object(map) => {
+                match map.get("type").and_then(Value::as_str).unwrap_or("") {
+                    // opencode calls the block "tool" and keeps its args and output in "state"
+                    "tool_use" | "function_call" | "tool_call" | "tool" if show.tools => {
+                        let name = ["name", "tool"]
+                            .iter()
+                            .find_map(|key| map.get(*key).and_then(Value::as_str))
+                            .unwrap_or("tool");
+                        let args = ["input", "arguments", "args", "parameters", "state"]
+                            .iter()
+                            .find_map(|key| map.get(*key))
+                            .map(Value::to_string)
+                            .unwrap_or_default();
+                        found.push(format!("- `{name}` {}", clean(&args, 200)));
+                    }
+                    "tool_result" | "function_call_output" if show.tools => {
+                        let out = ["content", "output", "result"]
+                            .iter()
+                            .find_map(|key| map.get(*key))
+                            .map(Value::to_string)
+                            .unwrap_or_default();
+                        found.push(format!("- -> {}", clean(&out, 200)));
+                    }
+                    "thinking" | "redacted_thinking" | "reasoning" if show.think => {
+                        let said = find_value(node, "thinking");
+                        let said = if said.is_empty() { find_value(node, "text") } else { said };
+                        found.push(format!("> {}", clean(&said, 4000)));
+                    }
+                    _ => {}
+                }
+                stack.extend(map.values());
+            }
+            Value::Array(items) => stack.extend(items.iter()),
+            _ => {}
+        }
+    }
+    found
+}
+
 /// First value for `key` anywhere in the record. The agents nest it differently: claude
 /// has cwd at the top, codex under payload, copilot under data.context.
 pub fn find_value(entry: &Value, key: &str) -> String {
