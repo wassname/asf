@@ -572,21 +572,24 @@ pub fn read(path: &str, head: usize, tail: usize, at: u64, show: Show) -> String
     ends(&blocks, head, tail).join("\n\n")
 }
 
-/// Mark the codex sessions an agent ran for itself. Name mode learns this while it reads the
-/// headers; content mode never reads them, so it asks here.
+/// Mark the runs an agent started for itself. Name mode learns this while it reads the
+/// headers; content mode never reads them, so it asks here, by the same rules.
 pub fn mark_subagents(rows: &mut [Row]) {
-    let codex: Vec<PathBuf> = rows
-        .iter()
-        .filter(|r| r.agent == "codex")
-        .map(|r| PathBuf::from(&r.path))
-        .collect();
-    let sub = scan::search(
-        r#""type":"session_meta"[^\n]*"subagent""#,
-        &codex,
-        &Scan { literal: false, icase: false, globs: &[], max_count: 1 },
-    );
+    let mut by_agent: Vec<(String, Vec<PathBuf>)> = Vec::new();
+    for row in rows.iter() {
+        match by_agent.iter_mut().find(|(a, _)| *a == row.agent) {
+            Some((_, paths)) => paths.push(PathBuf::from(&row.path)),
+            None => by_agent.push((row.agent.clone(), vec![PathBuf::from(&row.path)])),
+        }
+    }
+    let mut sub: Vec<String> = Vec::new();
+    name_sessions(&by_agent, |path, found| {
+        if found.sub {
+            sub.push(path.to_string());
+        }
+    });
     for row in rows.iter_mut() {
-        row.sub |= sub.contains_key(&row.path);
+        row.sub |= sub.contains(&row.path);
     }
 }
 
