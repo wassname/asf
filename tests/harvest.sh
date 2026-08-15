@@ -11,11 +11,12 @@ repo=/tmp/asf-fixture-repo
 
 scrub() { # $1 agent; jsonl on stdin
   jq -c --arg agent "$1" '
+    # what asf parses, and nothing else. A model id says which provider you pay, a project
+    # hash is a real path, and a name someone chose is that person writing.
     def keep: ["type","role","name","tool","toolName","tool_name","id","uuid","call_id",
                "toolCallId","tool_call_id","session_id","sessionId","sessionID","parentUuid",
                "parentId","parentID","messageId","messageID","promptId","callID",
-               "model","provider","version","timestamp","status","source","namespace",
-               "finish_reason","state","kind","projectHash"];
+               "version","timestamp","status","source","namespace","finish_reason","state","kind"];
     def titles: ["aiTitle","customTitle","agentName","title","thread_name","display_name"];
     def filler: "the \($agent) widget factory ships on tuesday";
     def fix:
@@ -119,7 +120,9 @@ insert into messages select id, session_id, role, content, tool_call_id, tool_ca
 detach real;
 update sessions set title = 'fixture hermes ' || rowid, display_name = null, cwd = '/tmp/asf-fixture-repo',
   git_repo_root = '/tmp/asf-fixture-repo', system_prompt = null, origin_json = null, git_branch = null,
-  session_key = null, chat_id = null, user_id = null, model_config = null, handoff_state = null;
+  session_key = null, chat_id = null, user_id = null, model_config = null, handoff_state = null,
+  model = null, billing_provider = null, billing_base_url = null, profile_name = null,
+  thread_id = null, handoff_platform = null, handoff_error = null, compression_failure_error = null;
 update sessions set parent_session_id = (select min(id) from sessions)
   where id = (select max(id) from sessions);
 update messages set content = 'the hermes widget factory ships on tuesday', api_content = null,
