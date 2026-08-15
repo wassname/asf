@@ -10,7 +10,7 @@
 | opencode | `~/.local/share/opencode/storage/session/<hash>/ses_*.json` | the file stem | `title` in that json |
 | gemini | `~/.gemini/tmp/<project>/logs.json`, and `chats/session-*.jsonl` | none, `--resume` takes `latest` or an index | the first prompt |
 | copilot | `~/.copilot/session-state/<uuid>/events.jsonl` | the directory name | the first message |
-| hermes | `~/.hermes/state.db`, sqlite | `20260806_184450_5f121c02` | not read by asf |
+| hermes | `~/.hermes/state.db`, sqlite | `20260806_184450_5f121c02` | `sessions.title`, else `display_name`, else the first message |
 
 claude, pi and opencode scope the lookup to the working directory. 82 codex and 236 opencode
 sessions record a directory that no longer exists.
@@ -79,6 +79,21 @@ the codex store to find the same thing doubled `asf` to 0.85 s.
 Open another agent's database with the `file:` URI form and `mode=ro`. Not `immutable=1`,
 which skips the write-ahead log: codex's `state_5.sqlite` has a 4.1 MB log, and `immutable=1`
 reported 537 threads where `mode=ro` reported 539.
+
+## Tests
+
+`cargo test` runs asf against `tests/fixtures/home`, a fake HOME holding one scrubbed session
+per agent. The records are real, so the schemas are real; every free-text value is replaced,
+so nothing private is committed. `tests/harvest.sh` rebuilds it.
+
+Two fixture details are load-bearing. The claude file holds four stale copies of each name
+record and one live copy of each, because reading the first record instead of the last was a
+real bug. The hermes database holds a child session, because its `parent_session_id` is the
+whole subagent rule there.
+
+An audit of the first version found the fixtures too uniform to fail: every claude name record
+scrubbed to the same string, so first and last were the same value and the bug they exist to
+catch went unnoticed. Scrubbed fixtures need the differences the test depends on put back by hand.
 
 ## Regression check
 
