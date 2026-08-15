@@ -58,12 +58,15 @@ fn a_content_search_reads_the_whole_transcript() {
 #[test]
 fn subagent_runs_are_hidden() {
     assert!(asf(&["-n", "20"]).contains("6 sessions matched"));
-    assert!(asf(&["--sub", "-n", "20"]).contains("8 sessions matched"));
+    assert!(asf(&["--sub", "-n", "20"]).contains("9 sessions matched"));
+    // pi names the ones a tool started; claude keeps its own in a directory of their own
     assert!(!asf(&["--paths", "-n", "20"]).contains("rev-v88"));
     assert!(asf(&["--sub", "--paths", "-n", "20"]).contains("rev-v88"));
+    assert!(!asf(&["--paths", "-n", "20"]).contains("/subagents/"));
+    assert!(asf(&["--sub", "--paths", "-n", "20"]).contains("/subagents/"));
     // content mode learns it from the header separately
     assert!(asf(&["-c", "widget"]).contains("6 sessions matched"));
-    assert!(asf(&["--sub", "-c", "widget"]).contains("8 sessions matched"));
+    assert!(asf(&["--sub", "-c", "widget"]).contains("9 sessions matched"));
 }
 
 #[test]

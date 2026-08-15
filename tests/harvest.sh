@@ -47,6 +47,9 @@ take claude "$src" "$dst" 30
 for kind in ai-title custom-title agent-name; do
   { grep "\"type\":\"$kind\"" "$src" || true; } | tail -1 | scrub claude >>"$dst"
 done
+# and one of its subagent logs, which must stay hidden: 703 of 869 files here are these
+sub=$(find ~/.claude/projects -path '*/subagents/*.jsonl' -printf '%T@ %p\n' | sort -rn | sed -n 2p | cut -d' ' -f2)
+take claude "$sub" "${dst%.jsonl}/subagents/$(basename "$sub")" 12
 
 # codex: one real session, and one subagent run that must stay hidden
 src=$($asf --paths -a codex -n 1)
@@ -82,6 +85,40 @@ for msg in $(ls "$real/message/$ses" | sed -n 1,4p); do
     take opencode "$real/part/${msg%.json}/$part" "$store/part/${msg%.json}/$part" all
   done
 done
+
+# hermes: a sqlite db, not files. Keep the real schema, replace the text, and make the second
+# session a child so the subagent rule has something to hide.
+real=$HOME/.hermes/state.db
+db=$out/.hermes/state.db
+mkdir -p "$(dirname "$db")"
+sqlite3 "file:$real?mode=ro" \
+  "select sql || ';' from sqlite_master where type='table' and name in ('sessions','messages')" |
+  sqlite3 "$db"
+sqlite3 "$db" <<SQL
+attach 'file:$real?mode=ro' as real;
+insert into sessions select * from real.sessions
+  where cwd is not null and message_count > 0 order by started_at desc limit 3;
+insert into messages select id, session_id, role, content, tool_call_id, tool_calls, tool_name,
+  effect_disposition, timestamp, token_count, finish_reason, reasoning, reasoning_content,
+  reasoning_details, codex_reasoning_items, codex_message_items, platform_message_id, observed,
+  active, compacted, api_content, display_kind, display_metadata from (
+  select m.*, row_number() over (partition by m.session_id order by m.timestamp) as seq
+  from real.messages m where m.session_id in (select id from sessions)) where seq <= 6;
+detach real;
+update sessions set title = 'fixture hermes ' || rowid, display_name = null, cwd = '/tmp/asf-fixture-repo',
+  git_repo_root = '/tmp/asf-fixture-repo', system_prompt = null, origin_json = null, git_branch = null,
+  session_key = null, chat_id = null, user_id = null, model_config = null, handoff_state = null;
+update sessions set parent_session_id = (select min(id) from sessions)
+  where id = (select max(id) from sessions);
+update messages set content = 'the hermes widget factory ships on tuesday', api_content = null,
+  reasoning = null, reasoning_content = null, reasoning_details = null, tool_calls = null,
+  codex_reasoning_items = null, codex_message_items = null, display_metadata = null;
+update messages set tool_calls = '[{"name":"bash","arguments":{}}]', tool_name = 'bash'
+  where id = (select min(id) from messages where role = 'assistant');
+update messages set reasoning = 'the hermes widget factory counts its boxes'
+  where id = (select max(id) from messages where role = 'assistant');
+vacuum;
+SQL
 
 mkdir -p "$repo"
 echo "wrote $(find "$out" -type f | wc -l) files to $out"
