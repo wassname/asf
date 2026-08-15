@@ -1,3 +1,5 @@
 /target
 # recorded from real transcripts: session names, project paths, your own words
 tests/golden/
+# a global *.db rule would drop the hermes fixture, and the tests need it
+!tests/fixtures/home/.hermes/state.db

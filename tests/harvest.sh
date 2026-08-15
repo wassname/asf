@@ -122,7 +122,11 @@ update sessions set title = 'fixture hermes ' || rowid, display_name = null, cwd
   git_repo_root = '/tmp/asf-fixture-repo', system_prompt = null, origin_json = null, git_branch = null,
   session_key = null, chat_id = null, user_id = null, model_config = null, handoff_state = null,
   model = null, billing_provider = null, billing_base_url = null, profile_name = null,
-  thread_id = null, handoff_platform = null, handoff_error = null, compression_failure_error = null;
+  thread_id = null, handoff_platform = null, handoff_error = null, compression_failure_error = null,
+  -- real spend and real token counts are telemetry about the person, not about the format
+  estimated_cost_usd = 0, actual_cost_usd = 0, input_tokens = 0, output_tokens = 0,
+  cache_read_tokens = 0, cache_write_tokens = 0, reasoning_tokens = 0, message_count = 6,
+  tool_call_count = 0;
 update sessions set parent_session_id = (select min(id) from sessions)
   where id = (select max(id) from sessions);
 update messages set content = 'the hermes widget factory ships on tuesday', api_content = null,

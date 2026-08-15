@@ -178,7 +178,9 @@ pub fn resume_for_path(hit: &str) -> String {
     let path = session_of(hit);
     let agent = agent_of(&path);
     if agent == "hermes" {
-        let row = hermes::session_of(&path).expect("no such hermes session");
+        let Some(row) = hermes::session_of(&path) else {
+            return format!("# hermes has no session {}, or its store could not be read", hermes::id_of(&path));
+        };
         return resume_command(&row);
     }
     let mut row = Row { path: path.clone(), agent: agent.clone(), ..Row::default() };

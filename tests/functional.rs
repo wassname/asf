@@ -115,6 +115,10 @@ fn hermes_is_read_out_of_its_database() {
     assert!(out.contains("# user"), "{out}");
     assert!(out.contains("- `bash`"), "{out}");
     assert!(out.contains("> the hermes widget factory counts its boxes"), "{out}");
+    // and the flags have to be asked for, or they are not flags
+    let plain = asf(&["--read", &path]);
+    assert!(!plain.contains("- `bash`"), "tool calls are out unless asked for:\n{plain}");
+    assert!(!plain.contains("counts its boxes"), "reasoning is out unless asked for:\n{plain}");
     // the child session is a run it started for itself, and hermes records the parent
     assert!(!asf(&["--paths", "-a", "hermes", "-n", "9"]).contains("20260802_213338_6dbf13"));
     assert!(asf(&["--sub", "--paths", "-a", "hermes", "-n", "9"]).contains("20260802_213338_6dbf13"));

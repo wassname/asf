@@ -9,6 +9,8 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::process::Command;
 
+static WARNED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+
 pub fn db() -> PathBuf {
     home().join(".hermes/state.db")
 }
@@ -34,15 +36,17 @@ fn query(sql: &str) -> Vec<Value> {
     }
     // mode=ro reads the write-ahead log too; immutable=1 skips it and loses the newest rows
     let uri = format!("file:{}?mode=ro", db().display());
+    // one query per call, and a listing calls this three times, so say it once
+    let once = |said: String| std::sync::OnceLock::get_or_init(&WARNED, || eprintln!("{said}"));
     let out = match Command::new("sqlite3").args(["-json", &uri, sql]).output() {
         Ok(out) => out,
         Err(err) => {
-            eprintln!("asf: hermes needs the sqlite3 command: {err}");
+            once(format!("asf: hermes needs the sqlite3 command: {err}"));
             return Vec::new();
         }
     };
     if !out.status.success() {
-        eprintln!("asf: hermes: {}", String::from_utf8_lossy(&out.stderr).trim());
+        once(format!("asf: hermes: {}", String::from_utf8_lossy(&out.stderr).trim()));
         return Vec::new();
     }
     serde_json::from_slice(&out.stdout).unwrap_or_default()
