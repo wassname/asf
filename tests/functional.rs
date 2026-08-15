@@ -24,7 +24,8 @@ fn path_of(agent: &str) -> String {
 #[test]
 fn every_agent_is_read() {
     let out = asf(&["-n", "20"]);
-    for agent in ["claude", "codex", "pi", "opencode", "copilot", "gemini"] {
+    // the agent column, padded, so that "pi" cannot be matched by "copilot"
+    for agent in ["| claude ", "| codex ", "| pi ", "| opencode ", "| copilot ", "| gemini "] {
         assert!(out.contains(agent), "{agent} is missing from\n{out}");
     }
     assert!(out.contains("6 sessions matched"), "{out}");
@@ -35,7 +36,9 @@ fn every_agent_is_read() {
 fn the_name_is_the_one_the_agent_ended_with() {
     let out = asf(&["-n", "20"]);
     assert!(out.contains("fixture claude agentName"), "{out}");
-    assert!(!out.contains("fixture claude aiTitle"), "an older name record won:\n{out}");
+    assert!(!out.contains("fixture claude aiTitle"), "a lesser name record won:\n{out}");
+    // the file holds four earlier copies of each record, all labelled stale
+    assert!(!out.contains("fixture claude stale"), "an older name record won:\n{out}");
     assert!(out.contains("fixture opencode title"), "{out}");
 }
 
@@ -60,8 +63,8 @@ fn subagent_runs_are_hidden() {
     assert!(asf(&["-n", "20"]).contains("6 sessions matched"));
     assert!(asf(&["--sub", "-n", "20"]).contains("9 sessions matched"));
     // pi names the ones a tool started; claude keeps its own in a directory of their own
-    assert!(!asf(&["--paths", "-n", "20"]).contains("rev-v88"));
-    assert!(asf(&["--sub", "--paths", "-n", "20"]).contains("rev-v88"));
+    assert!(!asf(&["--paths", "-n", "20"]).contains("rev-fixture-1"));
+    assert!(asf(&["--sub", "--paths", "-n", "20"]).contains("rev-fixture-1"));
     assert!(!asf(&["--paths", "-n", "20"]).contains("/subagents/"));
     assert!(asf(&["--sub", "--paths", "-n", "20"]).contains("/subagents/"));
     // content mode learns it from the header separately

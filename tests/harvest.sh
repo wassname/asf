@@ -13,8 +13,9 @@ scrub() { # $1 agent; jsonl on stdin
   jq -c --arg agent "$1" '
     def keep: ["type","role","name","tool","toolName","tool_name","id","uuid","call_id",
                "toolCallId","tool_call_id","session_id","sessionId","sessionID","parentUuid",
+               "parentId","parentID","messageId","messageID","promptId","callID",
                "model","provider","version","timestamp","status","source","namespace",
-               "finish_reason","messageID","callID","state","kind","projectHash"];
+               "finish_reason","state","kind","projectHash"];
     def titles: ["aiTitle","customTitle","agentName","title","thread_name","display_name"];
     def filler: "the \($agent) widget factory ships on tuesday";
     def fix:
@@ -29,7 +30,7 @@ scrub() { # $1 agent; jsonl on stdin
           else (.value | fix) end))
       elif type == "array" then map(if type == "string" then filler else fix end)
       else . end;
-    fix' 2>/dev/null
+    fix'
 }
 
 take() { # $1 agent, $2 source file, $3 dest, $4 lines, or "all" for one whole json
@@ -40,12 +41,18 @@ take() { # $1 agent, $2 source file, $3 dest, $4 lines, or "all" for one whole j
 rm -r "$out" 2>/dev/null || true
 mkdir -p "$out"
 
-# claude: the name records live at the end of the file, so take the last of each kind too
+# claude: the name records live at the end of the file, so take the last of each kind too.
+# The earlier copies are relabelled stale, because reading the first one instead of the last
+# is the bug this fixture is here to catch.
 src=$($asf --paths -a claude -n 1)
 dst=$out/.claude/projects/-tmp-asf-fixture-repo/$(basename "$src")
 take claude "$src" "$dst" 30
+sed -i 's/fixture claude [a-zA-Z]*"/fixture claude stale"/g' "$dst"
 for kind in ai-title custom-title agent-name; do
-  { grep "\"type\":\"$kind\"" "$src" || true; } | tail -1 | scrub claude >>"$dst"
+  # this session never got an ai-title, so borrow the record from one that did
+  with=$src
+  grep -q "\"type\":\"$kind\"" "$src" || with=$(grep -rl "\"type\":\"$kind\"" ~/.claude/projects --include=*.jsonl | sed -n 1p)
+  grep "\"type\":\"$kind\"" "$with" | tail -1 | scrub claude >>"$dst"
 done
 # and one of its subagent logs, which must stay hidden: 703 of 869 files here are these
 sub=$(find ~/.claude/projects -path '*/subagents/*.jsonl' -printf '%T@ %p\n' | sort -rn | sed -n 2p | cut -d' ' -f2)
@@ -57,11 +64,15 @@ take codex "$src" "$out/.codex/sessions/2026/08/15/$(basename "$src")" 30
 src=$($asf --sub --paths -a codex -n 40 | xargs grep -l '"subagent"' | sed -n 1p)
 take codex "$src" "$out/.codex/sessions/2026/08/15/$(basename "$src")" 12
 
-# pi: one session it minted a uuid for, and one a tool named, which must stay hidden
+# pi: one session it minted a uuid for, and one a tool named, which must stay hidden. The
+# name a tool chose is the person's words, so it is renamed in the file and in the id.
 src=$($asf --paths -a pi -n 1)
 take pi "$src" "$out/.pi/agent/sessions/--tmp-asf-fixture-repo--/$(basename "$src")" 30
 src=$($asf --sub --paths -a pi -n 200 | grep -E '_(rev|oracle|panel)-' | sed -n 1p)
-take pi "$src" "$out/.pi/agent/sessions/--tmp-asf-fixture-repo--/$(basename "$src")" 12
+name=$(basename "$src"); id=${name#*_}; id=${id%.jsonl}
+dst=$out/.pi/agent/sessions/--tmp-asf-fixture-repo--/${name%%_*}_rev-fixture-1.jsonl
+take pi "$src" "$dst" 12
+sed -i "s/$id/rev-fixture-1/g" "$dst"
 
 # copilot
 src=$($asf --paths -a copilot -n 1)
@@ -69,7 +80,7 @@ take copilot "$src" "$out/.copilot/session-state/$(basename "$(dirname "$src")")
 
 # gemini: logs.json is one array for the whole project, not jsonl
 src=$($asf --paths -a gemini -n 1)
-dst=$out/.gemini/tmp/$(basename "$(dirname "$src")")/logs.json
+dst=$out/.gemini/tmp/fixture-project/logs.json
 mkdir -p "$(dirname "$dst")"
 jq -c '.[0:6]' "$src" | scrub gemini >"$dst"
 
@@ -77,7 +88,8 @@ jq -c '.[0:6]' "$src" | scrub gemini >"$dst"
 src=$($asf --paths -a opencode -n 1)
 ses=$(basename "$src" .json)
 store=$out/.local/share/opencode/storage
-take opencode "$src" "$store/session/$(basename "$(dirname "$src")")/$ses.json" all
+# the directory opencode keeps it under is a hash of the real project path, so rename it
+take opencode "$src" "$store/session/fixtureproject/$ses.json" all
 real=$(dirname "$(dirname "$(dirname "$src")")")
 for msg in $(ls "$real/message/$ses" | sed -n 1,4p); do
   take opencode "$real/message/$ses/$msg" "$store/message/$ses/$msg" all
@@ -122,4 +134,6 @@ SQL
 
 mkdir -p "$repo"
 echo "wrote $(find "$out" -type f | wc -l) files to $out"
-grep -rlio "wassname\|/media/\|SGIronWolf" "$out" && echo "LEAK: the paths above still name a real place" || true
+# names leak as easily as contents: a project directory and a session id are both someone's words
+{ grep -rlio "$USER\|/media/\|/home/\|SGIronWolf" "$out"; find "$out" | grep -i "$USER\|SGIronWolf"; } &&
+  echo "LEAK: the paths above still name a real place" || true
