@@ -25,10 +25,12 @@ fn path_of(agent: &str) -> String {
 fn every_agent_is_read() {
     let out = asf(&["-n", "20"]);
     // the agent column, padded, so that "pi" cannot be matched by "copilot"
-    for agent in ["| claude ", "| codex ", "| pi ", "| opencode ", "| copilot ", "| gemini "] {
-        assert!(out.contains(agent), "{agent} is missing from\n{out}");
+    let agents = ["claude", "codex", "pi", "opencode", "copilot", "gemini", "hermes"];
+    for agent in agents {
+        assert!(out.contains(&format!("| {agent} ")), "{agent} is missing from\n{out}");
     }
-    assert!(out.contains("6 sessions matched"), "{out}");
+    // six files-on-disk agents with one session each, and hermes with two
+    assert!(out.contains("8 sessions matched"), "{out}");
 }
 
 /// claude rewrites its name records and keeps the old copies, so the last agent-name wins.
@@ -54,22 +56,22 @@ fn a_content_search_reads_the_whole_transcript() {
     let out = asf(&["-c", "the pi widget"]);
     assert!(out.contains("| pi "), "{out}");
     assert!(out.contains("1 sessions matched"), "{out}");
-    assert!(asf(&["-c", "widget"]).contains("6 sessions matched"));
+    assert!(asf(&["-c", "widget"]).contains("8 sessions matched"));
 }
 
 /// a run an agent started for itself cannot be resumed, so it is hidden unless asked for
 #[test]
 fn subagent_runs_are_hidden() {
-    assert!(asf(&["-n", "20"]).contains("6 sessions matched"));
-    assert!(asf(&["--sub", "-n", "20"]).contains("9 sessions matched"));
+    assert!(asf(&["-n", "20"]).contains("8 sessions matched"));
+    assert!(asf(&["--sub", "-n", "20"]).contains("12 sessions matched"));
     // pi names the ones a tool started; claude keeps its own in a directory of their own
     assert!(!asf(&["--paths", "-n", "20"]).contains("rev-fixture-1"));
     assert!(asf(&["--sub", "--paths", "-n", "20"]).contains("rev-fixture-1"));
     assert!(!asf(&["--paths", "-n", "20"]).contains("/subagents/"));
     assert!(asf(&["--sub", "--paths", "-n", "20"]).contains("/subagents/"));
     // content mode learns it from the header separately
-    assert!(asf(&["-c", "widget"]).contains("6 sessions matched"));
-    assert!(asf(&["--sub", "-c", "widget"]).contains("9 sessions matched"));
+    assert!(asf(&["-c", "widget"]).contains("8 sessions matched"));
+    assert!(asf(&["--sub", "-c", "widget"]).contains("12 sessions matched"));
 }
 
 #[test]
@@ -80,6 +82,7 @@ fn each_agent_gets_its_own_resume_command() {
         ("pi", "pi --session "),
         ("opencode", "opencode --session ses_"),
         ("copilot", "copilot --resume="),
+        ("hermes", "hermes --resume "),
     ] {
         let out = asf(&["--resume", &path_of(agent)]);
         assert!(out.contains(wanted), "{agent}: wanted {wanted:?}, got {out}");
@@ -101,6 +104,20 @@ fn read_exports_markdown() {
 
     let think = asf(&["--read", &path_of("codex"), "--think"]);
     assert!(think.contains("\n> "), "{think}");
+}
+
+/// hermes keeps its sessions in a sqlite database, so none of the file reading applies
+#[test]
+fn hermes_is_read_out_of_its_database() {
+    let path = path_of("hermes");
+    assert!(path.contains("state.db#"), "a hermes session is a row, not a file: {path}");
+    let out = asf(&["--read", &path, "--tools", "--think"]);
+    assert!(out.contains("# user"), "{out}");
+    assert!(out.contains("- `bash`"), "{out}");
+    assert!(out.contains("> the hermes widget factory counts its boxes"), "{out}");
+    // the child session is a run it started for itself, and hermes records the parent
+    assert!(!asf(&["--paths", "-a", "hermes", "-n", "9"]).contains("20260802_213338_6dbf13"));
+    assert!(asf(&["--sub", "--paths", "-a", "hermes", "-n", "9"]).contains("20260802_213338_6dbf13"));
 }
 
 #[test]

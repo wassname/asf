@@ -1,5 +1,6 @@
 //! Where the sessions live, how each agent names one, and how to read one back.
 
+use crate::hermes;
 use crate::record::*;
 use crate::scan::{self, Hits, JSONISH, Scan};
 use serde_json::Value;
@@ -8,24 +9,26 @@ use std::path::{Path, PathBuf};
 
 /// Every session store on this machine. Add an agent by adding a line. Content search works
 /// on any of them; names need one line in NAME_PATTERNS or in load_sessions.
-/// hermes is absent on purpose: it keeps its sessions in ~/.hermes/state.db, a sqlite file.
-pub const SOURCES: [(&str, &str); 6] = [
+/// hermes is last and is a sqlite file, not a directory: src/hermes.rs reads it instead.
+pub const SOURCES: [(&str, &str); 7] = [
     ("claude", ".claude/projects"),
     ("codex", ".codex/sessions"),
     ("pi", ".pi/agent/sessions"),
     ("gemini", ".gemini/tmp"),
     ("opencode", ".local/share/opencode/storage"),
     ("copilot", ".copilot/session-state"),
+    ("hermes", ".hermes/state.db"),
 ];
 
 /// how to reopen a session, by agent. gemini is absent: its --resume takes `latest` or a
 /// list index, never an id.
-const RESUME: [(&str, &str); 5] = [
+const RESUME: [(&str, &str); 6] = [
     ("claude", "claude --resume {sid}"),
     ("codex", "codex resume {sid}"),
     ("pi", "pi --session {sid}"),
     ("opencode", "opencode --session {sid}"),
     ("copilot", "copilot --resume={sid}"),
+    ("hermes", "hermes --resume {sid}"),
 ];
 
 /// the three records claude writes for a session's name; TITLE_FIELDS is their order of rank
@@ -135,6 +138,8 @@ pub fn session_id(path: &str, agent: &str) -> String {
         }
     match agent {
         "opencode" => stem,
+        // a hermes session is a row in a database, and its path is <db>#<id>
+        "hermes" => hermes::id_of(path),
         // the id is inside the record: a pi filename truncates it at an underscore, and for
         // 8 of 1216 sessions here the filename uuid is not the one pi answers to
         "pi" => first_record(path).map_or(stem, |e| find_value(&e, "id")),
@@ -172,6 +177,10 @@ pub fn resume_command(row: &Row) -> String {
 pub fn resume_for_path(hit: &str) -> String {
     let path = session_of(hit);
     let agent = agent_of(&path);
+    if agent == "hermes" {
+        let row = hermes::session_of(&path).expect("no such hermes session");
+        return resume_command(&row);
+    }
     let mut row = Row { path: path.clone(), agent: agent.clone(), ..Row::default() };
     name_sessions(&[(agent, vec![PathBuf::from(&path)])], |_, found| {
         if row.cwd.is_empty() {
@@ -380,6 +389,8 @@ pub fn load_sessions() -> Vec<Row> {
         row.mtime = mtime(&row.path);
     }
     typed_names(&mut rows);
+    // hermes has its own reader: its sessions are rows in a database, not files
+    rows.extend(hermes::sessions());
     rows
 }
 
@@ -413,7 +424,8 @@ fn opencode_sessions() -> HashMap<String, String> {
 
 /// Search every store. One row per session, at its first hit.
 pub fn search_content(query: &str, regex: bool) -> Vec<Row> {
-    let roots: Vec<PathBuf> = SOURCES.iter().map(|(a, _)| store(a)).collect();
+    let roots: Vec<PathBuf> =
+        SOURCES.iter().filter(|(a, _)| *a != "hermes").map(|(a, _)| store(a)).collect();
     let scan = |paths: &[PathBuf], max_count: usize| -> Hits {
         scan::search(
             query,
@@ -468,7 +480,12 @@ pub fn search_content(query: &str, regex: bool) -> Vec<Row> {
         row.line = real.line;
         row.mtime = mtime(hit_path);
     }
-    rows.into_vec()
+    let mut rows = rows.into_vec();
+    let wanted = if regex { query.to_string() } else { regex::escape(query) };
+    if let Ok(pattern) = regex::Regex::new(&format!("(?i){wanted}")) {
+        rows.extend(hermes::search_content(&pattern, query));
+    }
+    rows
 }
 
 /// Fill in the match text, the session name and the working directory. Only for the rows you
@@ -598,6 +615,14 @@ pub fn preview(path: &str, at: u64) -> String {
     let agent = agent_of(path);
     let mut cwd = String::new();
     let mut title = String::new();
+    let mut at_time = mtime(path);
+    if agent == "hermes"
+        && let Some(row) = hermes::session_of(path)
+    {
+        cwd = row.cwd;
+        title = row.title;
+        at_time = row.mtime;
+    }
     name_sessions(&[(agent.clone(), vec![PathBuf::from(path)])], |_, found| {
         if cwd.is_empty() {
             cwd = found.cwd;
@@ -611,7 +636,7 @@ pub fn preview(path: &str, at: u64) -> String {
     let label = |name: &str, value: String| format!("\x1b[2m{name:7}\x1b[0m{value}");
     let mut out = vec![
         label("client", agent.clone()),
-        label("date", day(mtime(path), "%Y-%m-%d %H:%M")),
+        label("date", day(at_time, "%Y-%m-%d %H:%M")),
         label("name", clean(&title, 200)),
         label("dir", if cwd.is_empty() { path.to_string() } else { cwd.clone() }),
     ];
@@ -665,6 +690,9 @@ fn files_named(path: &str) -> Vec<String> {
 
 /// One block per message, in order.
 fn blocks(path: &str, at: u64, show: Show) -> Vec<String> {
+    if agent_of(path) == "hermes" {
+        return hermes::blocks(path, show);
+    }
     let stem = Path::new(path).file_stem().unwrap_or_default().to_string_lossy().to_string();
     if stem.starts_with("ses_") {
         // opencode: a session is a directory of shards

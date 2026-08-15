@@ -10,6 +10,7 @@
 //! to build and nothing to go stale. Stopping each file at its first hit is what keeps a
 //! common word from returning 200k rows.
 
+mod hermes;
 mod pick;
 mod record;
 mod scan;

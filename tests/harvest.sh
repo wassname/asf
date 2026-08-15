@@ -126,9 +126,9 @@ update messages set content = 'the hermes widget factory ships on tuesday', api_
   reasoning = null, reasoning_content = null, reasoning_details = null, tool_calls = null,
   codex_reasoning_items = null, codex_message_items = null, display_metadata = null;
 update messages set tool_calls = '[{"name":"bash","arguments":{}}]', tool_name = 'bash'
-  where id = (select min(id) from messages where role = 'assistant');
+  where id in (select min(id) from messages where role = 'assistant' group by session_id);
 update messages set reasoning = 'the hermes widget factory counts its boxes'
-  where id = (select max(id) from messages where role = 'assistant');
+  where id in (select max(id) from messages where role = 'assistant' group by session_id);
 vacuum;
 SQL
 
