@@ -557,7 +557,7 @@ fn opencode_transcript(session_json: &str, show: Show) -> Vec<String> {
             .filter(|t| !t.trim().is_empty())
             .collect();
         if !said.is_empty() {
-            blocks.push(format!("## {role}\n{}", said.join("\n")));
+            blocks.push(format!("# {role}\n{}", said.join("\n")));
         }
     }
     blocks
@@ -696,7 +696,7 @@ fn blocks(path: &str, at: u64, show: Show) -> Vec<String> {
     blocks
 }
 
-/// One record as `## role\nwhat was said`; `verbatim` keeps preambles and tool calls too.
+/// One record as `# role\nwhat was said`; `verbatim` keeps preambles and tool calls too.
 fn block(line: &str, verbatim: bool, show: Show) -> Option<String> {
     let entry = parse(line)?;
     // claude files a tool result as a user turn, and echoes the prompt as an isMeta one
@@ -704,24 +704,29 @@ fn block(line: &str, verbatim: bool, show: Show) -> Option<String> {
     if !verbatim && (result || entry.get("isMeta") == Some(&Value::Bool(true))) {
         return None;
     }
-    // claude files a tool result under the user's role, which reads as the user talking
-    let role =
-        if entry.get("toolUseResult").is_some() { "tool".to_string() } else { role_of(&entry) };
+    let calls = extras(&entry, show);
     let said: Vec<String> = texts(&entry)
         .into_iter()
         .filter(|t| !t.trim().is_empty())
         .filter(|t| verbatim || !is_junk(t))
-        .chain(extras(&entry, show))
+        .chain(calls.iter().cloned())
         .collect();
     let mut body = said.join("\n");
     if verbatim && body.is_empty() {
         // the match landed in a tool call; show the record itself
         body = cut(&serde_json::to_string_pretty(&entry).unwrap_or_default(), 4000);
     }
-    if body.is_empty() || !(verbatim || ["user", "assistant", "tool"].contains(&role.as_str())) {
+    // claude files a tool result under the user's role, and codex and pi give the tool
+    // records a role of their own, so anything that is only tool lines is labelled tool
+    let spoke = role_of(&entry);
+    let turn = ["user", "assistant"].contains(&spoke.as_str())
+        && entry.get("toolUseResult").is_none();
+    let role = if turn { spoke } else { "tool".to_string() };
+    if body.is_empty() || !(verbatim || turn || !calls.is_empty()) {
         return None;
     }
-    Some(format!("## {role}\n{body}"))
+    // level 1, because the messages themselves are full of ## headings
+    Some(format!("# {role}\n{body}"))
 }
 
 /// The first `head` and last `tail` blocks, with a marker for the dropped middle. 0,0 is all.
@@ -730,7 +735,7 @@ fn ends(blocks: &[String], head: usize, tail: usize) -> Vec<String> {
         return blocks.to_vec();
     }
     let mut kept: Vec<String> = blocks[..head].to_vec();
-    kept.push(format!("## ... {} messages ...", blocks.len() - head - tail));
+    kept.push(format!("# ... {} messages ...", blocks.len() - head - tail));
     kept.extend_from_slice(&blocks[blocks.len() - tail..]);
     kept
 }

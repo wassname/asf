@@ -115,34 +115,42 @@ pub fn extras(entry: &Value, show: Show) -> Vec<String> {
     while let Some(node) = stack.pop() {
         match node {
             Value::Object(map) => {
-                match map.get("type").and_then(Value::as_str).unwrap_or("") {
-                    // opencode calls the block "tool" and keeps its args and output in "state"
-                    "tool_use" | "function_call" | "tool_call" | "tool" if show.tools => {
-                        let name = ["name", "tool"]
-                            .iter()
-                            .find_map(|key| map.get(*key).and_then(Value::as_str))
-                            .unwrap_or("tool");
-                        let args = ["input", "arguments", "args", "parameters", "state"]
-                            .iter()
-                            .find_map(|key| map.get(*key))
-                            .map(Value::to_string)
-                            .unwrap_or_default();
-                        found.push(format!("- `{name}` {}", clean(&args, 200)));
-                    }
-                    "tool_result" | "function_call_output" if show.tools => {
-                        let out = ["content", "output", "result"]
-                            .iter()
-                            .find_map(|key| map.get(*key))
-                            .map(Value::to_string)
-                            .unwrap_or_default();
-                        found.push(format!("- -> {}", clean(&out, 200)));
-                    }
-                    "thinking" | "redacted_thinking" | "reasoning" if show.think => {
-                        let said = find_value(node, "thinking");
-                        let said = if said.is_empty() { find_value(node, "text") } else { said };
-                        found.push(format!("> {}", clean(&said, 4000)));
-                    }
-                    _ => {}
+                // six agents, six spellings: tool_use, toolCall, custom_tool_call,
+                // function_call, tool, tool.execution_start. Compare letters only.
+                let kind: String = map
+                    .get("type")
+                    .or_else(|| map.get("role")) // pi files a result as role toolResult
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .chars()
+                    .filter(char::is_ascii_alphabetic)
+                    .collect::<String>()
+                    .to_lowercase();
+                let tool = kind.contains("tool") || kind.starts_with("functioncall");
+                let done = ["result", "output", "complete"].iter().any(|e| kind.ends_with(e));
+                if show.tools && tool && !done {
+                    // opencode keeps the args under state, everyone else names them
+                    let name = ["name", "tool", "toolName", "tool_name"]
+                        .iter()
+                        .find_map(|key| map.get(*key).and_then(Value::as_str))
+                        .unwrap_or("tool");
+                    let args = ["input", "arguments", "args", "parameters", "state", "data"]
+                        .iter()
+                        .find_map(|key| map.get(*key))
+                        .map(Value::to_string)
+                        .unwrap_or_default();
+                    found.push(format!("- `{name}` {}", clean(&args, 200)));
+                } else if show.tools && tool {
+                    let out = ["content", "output", "result", "data"]
+                        .iter()
+                        .find_map(|key| map.get(*key))
+                        .map(Value::to_string)
+                        .unwrap_or_default();
+                    found.push(format!("- -> {}", clean(&out, 200)));
+                } else if show.think && (kind.contains("thinking") || kind == "reasoning") {
+                    let said = find_value(node, "thinking");
+                    let said = if said.is_empty() { find_value(node, "text") } else { said };
+                    found.push(format!("> {}", clean(&said, 4000)));
                 }
                 stack.extend(map.values());
             }
