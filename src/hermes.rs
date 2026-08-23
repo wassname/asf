@@ -147,7 +147,7 @@ pub fn blocks(path: &str, show: Show) -> Vec<String> {
             if said.is_empty() {
                 return None;
             }
-            Some(format!("# {}\n{}", text(row, "role"), said.join("\n")))
+            Some(format!("## {}\n{}", text(row, "role"), said.join("\n")))
         })
         .collect()
 }

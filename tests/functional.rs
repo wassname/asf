@@ -94,13 +94,13 @@ fn each_agent_gets_its_own_resume_command() {
 #[test]
 fn read_exports_markdown() {
     let plain = asf(&["--read", &path_of("claude")]);
-    assert!(plain.starts_with("# "), "{plain}");
-    assert!(plain.contains("# assistant"), "{plain}");
+    assert!(plain.starts_with("## "), "{plain}");
+    assert!(plain.contains("## assistant"), "{plain}");
     assert!(!plain.contains("- `Bash`"), "tool calls are out unless asked for:\n{plain}");
 
     let tools = asf(&["--read", &path_of("claude"), "--tools"]);
     assert!(tools.contains("- `"), "{tools}");
-    assert!(tools.contains("# tool"), "a tool result is not the user talking:\n{tools}");
+    assert!(tools.contains("## tool"), "a tool result is not the user talking:\n{tools}");
 
     let think = asf(&["--read", &path_of("codex"), "--think"]);
     assert!(think.contains("\n> "), "{think}");
@@ -112,7 +112,7 @@ fn hermes_is_read_out_of_its_database() {
     let path = path_of("hermes");
     assert!(path.contains("state.db#"), "a hermes session is a row, not a file: {path}");
     let out = asf(&["--read", &path, "--tools", "--think"]);
-    assert!(out.contains("# user"), "{out}");
+    assert!(out.contains("## user"), "{out}");
     assert!(out.contains("- `bash`"), "{out}");
     assert!(out.contains("> the hermes widget factory counts its boxes"), "{out}");
     // and the flags have to be asked for, or they are not flags

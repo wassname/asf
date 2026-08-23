@@ -36,7 +36,7 @@ renamed part way through, this is the name it ended with.
 Runs an agent started for itself are hidden, because you cannot resume them. --sub shows them.
 For pi that means every session with a name, since pi gives its own a uuid and only a tool
 passes --session-id.
---read exports the session as markdown, `# role` a message, the conversation only. --tools
+--read exports the session as markdown, `## role` a message, the conversation only. --tools
 and --think put the tool calls and the reasoning back, a line each; --head and --tail cut it.
 --read, --preview and --resume take a transcript path, or no path at all, in which case they
 take the newest session the query matched: `asf lucid --read` needs no path pasted in.

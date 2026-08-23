@@ -576,7 +576,7 @@ fn opencode_transcript(session_json: &str, show: Show) -> Vec<String> {
             .filter(|t| !t.trim().is_empty())
             .collect();
         if !said.is_empty() {
-            blocks.push(format!("# {role}\n{}", said.join("\n")));
+            blocks.push(format!("## {role}\n{}", said.join("\n")));
         }
     }
     blocks
@@ -758,8 +758,8 @@ fn block(line: &str, verbatim: bool, show: Show) -> Option<String> {
     if body.is_empty() || !(verbatim || turn || !calls.is_empty()) {
         return None;
     }
-    // level 1, because the messages themselves are full of ## headings
-    Some(format!("# {role}\n{body}"))
+    // level 2, so the export drops under a `# session` heading in whatever report it is pasted into
+    Some(format!("## {role}\n{body}"))
 }
 
 /// The first `head` and last `tail` blocks, with a marker for the dropped middle. 0,0 is all.
@@ -768,7 +768,7 @@ fn ends(blocks: &[String], head: usize, tail: usize) -> Vec<String> {
         return blocks.to_vec();
     }
     let mut kept: Vec<String> = blocks[..head].to_vec();
-    kept.push(format!("# ... {} messages ...", blocks.len() - head - tail));
+    kept.push(format!("## ... {} messages ...", blocks.len() - head - tail));
     kept.extend_from_slice(&blocks[blocks.len() - tail..]);
     kept
 }
