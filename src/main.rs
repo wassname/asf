@@ -38,6 +38,8 @@ For pi that means every session with a name, since pi gives its own a uuid and o
 passes --session-id.
 --read exports the session as markdown, `# role` a message, the conversation only. --tools
 and --think put the tool calls and the reasoning back, a line each; --head and --tail cut it.
+--read, --preview and --resume take a transcript path, or no path at all, in which case they
+take the newest session the query matched: `asf lucid --read` needs no path pasted in.
 
 The picker prints its own keys. README.md and RESEARCH_JOURNAL.md have the rest."
 )]
@@ -68,14 +70,14 @@ struct Args {
     /// the tab separated rows the picker gets, for checking
     #[arg(long)]
     rows: bool,
-    /// print a transcript as text
-    #[arg(long, value_name = "PATH")]
+    /// print a transcript as text. No PATH: the newest session the query matched
+    #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = "")]
     read: Option<String>,
     /// one screen about a transcript: where it ran, files it named, its first and last words
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = "")]
     preview: Option<String>,
     /// print the command that reopens a transcript
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = "")]
     resume: Option<String>,
     /// with --read, only the first N messages
     #[arg(long, default_value_t = 0)]
@@ -210,22 +212,33 @@ fn rows_tsv(rows: &[Row]) -> String {
         .join("\n")
 }
 
+/// Whichever of --read/--preview/--resume was asked for, against one transcript.
+fn one(args: &Args, path: &str) -> ! {
+    let out = if args.read.is_some() {
+        let show = record::Show { tools: args.tools, think: args.think };
+        sessions::read(path, args.head, args.tail, args.line, show)
+    } else if args.preview.is_some() {
+        sessions::preview(path, args.line)
+    } else {
+        sessions::resume_for_path(path)
+    };
+    if out.trim().is_empty() {
+        eprintln!("asf: no session records in {path}");
+        std::process::exit(1);
+    }
+    println!("{out}");
+    std::process::exit(0);
+}
+
 fn main() {
     unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) }; // let `| head` close the pipe quietly
     let args = Args::parse();
 
-    if let Some(path) = &args.read {
-        let show = record::Show { tools: args.tools, think: args.think };
-        println!("{}", sessions::read(path, args.head, args.tail, args.line, show));
-        return;
-    }
-    if let Some(path) = &args.preview {
-        println!("{}", sessions::preview(path, args.line));
-        return;
-    }
-    if let Some(path) = &args.resume {
-        println!("{}", sessions::resume_for_path(path));
-        return;
+    // a path given outright needs no scan; an empty one means "resolve it from the query"
+    let one_of = [args.read.as_deref(), args.preview.as_deref(), args.resume.as_deref()];
+    let wants_one = one_of.iter().any(|f| f.is_some());
+    if let Some(path) = one_of.into_iter().flatten().find(|p| !p.is_empty()) {
+        one(&args, path);
     }
 
     // a store that moved or got renamed would otherwise just go quiet
@@ -278,6 +291,16 @@ fn main() {
     rows.sort_by(|a, b| b.mtime.total_cmp(&a.mtime));
 
     let total = rows.len();
+    if wants_one {
+        let Some(row) = rows.first() else {
+            eprintln!("asf: nothing matched {query:?}");
+            std::process::exit(1);
+        };
+        if total > 1 {
+            eprintln!("asf: {total} matched, taking the newest: {}", record::cut(&row.title, 60));
+        }
+        one(&args, &row.path.clone());
+    }
     if args.pick {
         rows.truncate(pick::ROWS);
         sessions::hydrate(&mut rows, &query);
