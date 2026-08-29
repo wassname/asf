@@ -73,7 +73,7 @@ struct Args {
     /// print a transcript as text. No PATH: the newest session the query matched
     #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = "")]
     read: Option<String>,
-    /// one screen about a transcript: where it ran, files it named, its first and last words
+    /// one screen about a transcript: where it ran, its model, files it named, first and last words
     #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = "")]
     preview: Option<String>,
     /// print the command that reopens a transcript

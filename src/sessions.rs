@@ -193,7 +193,7 @@ pub fn resume_for_path(hit: &str) -> String {
 }
 
 /// An opencode hit is one shard; every shard names the session it belongs to.
-fn session_of(hit: &str) -> String {
+pub fn session_of(hit: &str) -> String {
     let stem = Path::new(hit).file_stem().unwrap_or_default().to_string_lossy().to_string();
     if agent_of(hit) != "opencode" || stem.starts_with("ses_") {
         return hit.to_string();
@@ -269,6 +269,20 @@ where
                     }
                 }
                 add(&path, Found { title: clean(&title, 110), force: true, ..Found::default() });
+            }
+        }
+        if agent == "pi" {
+            // pi files its own name for a session as a record of its own, rewritten as the
+            // session is renamed, so the last one is the live name
+            for (path, hits) in names(r#""type":"session_info""#, paths, usize::MAX) {
+                let name = hits
+                    .iter()
+                    .rev()
+                    .filter_map(|h| parse(&h.text))
+                    .map(|e| find_value(&e, "name"))
+                    .find(|n| !n.is_empty())
+                    .unwrap_or_default();
+                add(&path, Found { title: clean(&name, 110), force: true, ..Found::default() });
             }
         }
         if agent == "opencode" {
@@ -634,10 +648,12 @@ pub fn preview(path: &str, at: u64) -> String {
         }
     });
 
-    let files = files_named(path);
+    let raw = raw_text(path);
+    let files = files_named(&raw);
+    let model = model_used(&raw);
     let label = |name: &str, value: String| format!("\x1b[2m{name:7}\x1b[0m{value}");
     let mut out = vec![
-        label("client", agent.clone()),
+        label("client", if model.is_empty() { agent.clone() } else { format!("{agent}  {model}") }),
         label("date", day(at_time, "%Y-%m-%d %H:%M")),
         label("name", clean(&title, 200)),
         label("dir", if cwd.is_empty() { path.to_string() } else { cwd.clone() }),
@@ -666,20 +682,30 @@ pub fn preview(path: &str, at: u64) -> String {
     out.join("\n")
 }
 
-/// Files the session named in a tool call, read from the raw records: each agent has its own key.
-fn files_named(path: &str) -> Vec<String> {
-    let raw = match Path::new(path).file_stem().unwrap_or_default().to_string_lossy() {
-        // opencode keeps the tool calls in its part shards, not in the session file
+/// The whole session as text, whatever it is split over.
+fn raw_text(path: &str) -> String {
+    match Path::new(path).file_stem().unwrap_or_default().to_string_lossy() {
+        // opencode keeps the tool calls and the model in its part shards, not the session file
         stem if stem.starts_with("ses_") => opencode_messages(path)
             .into_iter()
-            .flat_map(|(_, parts)| parts)
+            .flat_map(|(message, parts)| std::iter::once(message).chain(parts))
             .filter_map(|p| std::fs::read_to_string(p).ok())
             .collect::<Vec<_>>()
             .join("\n"),
         _ => String::from_utf8_lossy(&std::fs::read(path).unwrap_or_default()).into_owned(),
-    };
+    }
+}
+
+/// The model the session last ran on. Every agent writes it on each turn, under its own
+/// spelling, so the last one is the one you were on when you stopped.
+fn model_used(raw: &str) -> String {
+    MODEL_KEY.captures_iter(raw).last().map_or(String::new(), |found| found[1].to_string())
+}
+
+/// Files the session named in a tool call, read from the raw records: each agent has its own key.
+fn files_named(raw: &str) -> Vec<String> {
     let mut seen: Vec<String> = Vec::new();
-    for found in FILE_ARG.captures_iter(&raw) {
+    for found in FILE_ARG.captures_iter(raw) {
         let name = &found[1];
         let short = name.rsplit('/').next().unwrap_or(name).to_string();
         if !short.is_empty() && !seen.contains(&short) {

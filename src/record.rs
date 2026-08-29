@@ -19,6 +19,10 @@ pub static FILE_ARG: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
+/// what the turn ran on: claude and codex write model, pi modelId, opencode modelID
+pub static MODEL_KEY: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#""(?:model|modelId|modelID|model_id)": ?"([^"\\]{1,60})""#).unwrap());
+
 /// preambles that are not what the session is about
 pub const JUNK: [&str; 17] = [
     "<local-command-caveat>",

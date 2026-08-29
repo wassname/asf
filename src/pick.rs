@@ -1,6 +1,7 @@
 //! skim ranks loaded names; ctrl-q switches to a command that rescans every transcript.
 
-use crate::sessions::{SOURCES, resume_for_path};
+use crate::record::Show;
+use crate::sessions::{SOURCES, read, resume_for_path, session_of};
 use skim::prelude::*;
 use std::io::Cursor;
 
@@ -50,7 +51,7 @@ pub fn pick(tsv: String, filters: &str, query: &str) {
         delimiter: "\t".to_string(),
         no_multi: true,
         ansi: true,
-        expect: vec!["alt-p".to_string()],
+        expect: vec!["alt-p".to_string(), "alt-m".to_string()],
         // default layout draws the list bottom-up, where page-down is a no-op at the newest row
         layout: "reverse".to_string(),
         // rows arrive newest first, and that beats a fuzzy score: you are usually after a
@@ -69,13 +70,16 @@ pub fn pick(tsv: String, filters: &str, query: &str) {
         bind: [
             agents,
             vec![
+                // ctrl too: alt-up/down is a habit, but ctrl-up/down is what the hand reaches for
                 "alt-down:preview-page-down".to_string(),
                 "alt-up:preview-page-up".to_string(),
+                "ctrl-down:preview-page-down".to_string(),
+                "ctrl-up:preview-page-up".to_string(),
             ],
         ]
         .concat(),
         header: Some(format!(
-            "enter resume  alt-p path  ctrl-q name<->transcript  alt-up/down preview\n{}\n{}",
+            "enter resume  alt-p path  alt-m markdown  ctrl-q name<->transcript  ctrl-up/down preview\n{}\n{}",
             legend.join("  "),
             header_row()
         )),
@@ -94,6 +98,11 @@ pub fn pick(tsv: String, filters: &str, query: &str) {
     }
     if out.final_key == Key::Alt('p') {
         println!("{}", fields[1]);
+        return;
+    }
+    // the whole conversation as markdown, so `asf -i > session.md` works from the picker
+    if out.final_key == Key::Alt('m') {
+        println!("{}", read(&session_of(&fields[1]), 0, 0, 0, Show::default()));
         return;
     }
     // read the session fresh: after a transcript search these rows are ones the caller never scanned

@@ -10,7 +10,7 @@ asf -c "staging dir"       # sessions whose TRANSCRIPT matches, assistant text i
 asf -i steer               # pick one; enter prints the resume command
 asf --paths -c steer       # transcript paths, for piping
 asf --read PATH --tail 20  # the last 20 messages, as markdown; --tools --think keep those too
-asf --preview PATH         # where it ran, the files it named, its first and last words
+asf --preview PATH         # where it ran, its model, the files it named, first and last words
 asf --resume PATH          # the command that reopens it
 ```
 
@@ -34,10 +34,11 @@ It searches with ripgrep's crates instead of an index: half a second over 3.7 GB
 |---|---|
 | enter | print the resume command |
 | alt-p | print the transcript path |
+| alt-m | print the whole session as markdown, same as `--read` |
 | ctrl-q | swap `name>` and `transcript>` search; the prompt says which you are in |
 | f1..f6 | keep one agent, f7 for all of them again |
 | pgdn, pgup | a page of rows |
-| alt-down, alt-up | a page of the preview |
+| ctrl-down, ctrl-up (alt too) | a page of the preview |
 
 ## Install
 

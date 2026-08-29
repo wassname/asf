@@ -42,6 +42,8 @@ fn the_name_is_the_one_the_agent_ended_with() {
     // the file holds four earlier copies of each record, all labelled stale
     assert!(!out.contains("fixture claude stale"), "an older name record won:\n{out}");
     assert!(out.contains("fixture opencode title"), "{out}");
+    // pi keeps its name in a session_info record, which beats the opening message
+    assert!(out.contains("fixture pi name"), "{out}");
 }
 
 #[test]
@@ -138,4 +140,6 @@ fn preview_says_where_it_ran() {
     let out = asf(&["--preview", &path_of("pi")]);
     assert!(out.contains("/tmp/asf-fixture-repo"), "{out}");
     assert!(out.contains("pi"), "{out}");
+    // the model it last ran on, beside the agent. The fixture scrubs the id to the filler.
+    assert!(out.contains("pi  the pi widget factory"), "no model in\n{out}");
 }

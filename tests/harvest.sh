@@ -68,7 +68,11 @@ take codex "$src" "$out/.codex/sessions/2026/08/15/$(basename "$src")" 12
 # pi: one session it minted a uuid for, and one a tool named, which must stay hidden. The
 # name a tool chose is the person's words, so it is renamed in the file and in the id.
 src=$($asf --paths -a pi -n 1)
-take pi "$src" "$out/.pi/agent/sessions/--tmp-asf-fixture-repo--/$(basename "$src")" 30
+dst=$out/.pi/agent/sessions/--tmp-asf-fixture-repo--/$(basename "$src")
+take pi "$src" "$dst" 30
+# pi names a session in a record of its own. Most sessions never get one, so write the record
+# rather than hunt for a real one, whose name would be the person's words anyway.
+echo '{"type":"session_info","id":"5e551011","parentId":null,"timestamp":"2026-08-14T22:09:01.000Z","name":"fixture pi name"}' >>"$dst"
 src=$($asf --sub --paths -a pi -n 200 | grep -E '_(rev|oracle|panel)-' | sed -n 1p)
 name=$(basename "$src"); id=${name#*_}; id=${id%.jsonl}
 dst=$out/.pi/agent/sessions/--tmp-asf-fixture-repo--/${name%%_*}_rev-fixture-1.jsonl
