@@ -9,10 +9,10 @@ asf steer                  # sessions whose NAME matches
 asf -c "staging dir"       # sessions whose TRANSCRIPT matches, assistant text included
 asf -i steer               # pick one; enter prints the resume command
 asf --paths -c steer       # transcript paths, for piping
-asf --read PATH --tail 20  # the last 20 messages, as markdown; --tools --think keep those too
-asf --read SESSION_ID      # the id out of a resume command works too, as does `asf query --read`
-asf --preview PATH         # where it ran, its model, the files it named, first and last words
-asf --resume PATH          # the command that reopens it
+asf --read 019ffeb2        # that session as markdown, by the id its resume command shows
+asf --read 019ffeb2 --tail 20  # its last 20 messages; --tools --think keep those too
+asf --preview 019ffeb2     # where it ran, its model, the files it named, first and last words
+asf --resume steer         # the command that reopens the newest session named steer
 ```
 
 Every row carries the transcript path, so the answer to "which session was that" is a path

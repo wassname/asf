@@ -4,6 +4,7 @@
 //!     asf steer                sessions whose NAME matches (default)
 //!     asf -c "staging dir"     sessions whose TRANSCRIPT matches, assistant text included
 //!     asf -i steer             pick one in skim; enter prints the resume command
+//!     asf --read 019ffeb2      that session as markdown, by the id its resume command shows
 //!     asf --paths -c steer     just the transcript paths, for piping
 //!
 //! No index. The scan reads all 3.4 GB of transcripts in about a second, so there is nothing
@@ -38,9 +39,10 @@ For pi that means every session with a name, since pi gives its own a uuid and o
 passes --session-id.
 --read exports the session as markdown, `## role` a message, the conversation only. --tools
 and --think put the tool calls and the reasoning back, a line each; --head and --tail cut it.
---read, --preview and --resume take a transcript path, a session id out of a resume command,
-or nothing at all, in which case they take the newest session the query matched:
-`asf --read 019ffeb2-9c72-7ad0` and `asf lucid --read` both work.
+SESSION is the id in the resume command asf just printed you, which is also the id your agent
+shows. `asf --resume lucid` says `codex resume 019ffeb2-9c72-7ad0`, so `asf --read 019ffeb2` or
+`asf --preview 019ffeb2` reads that same session back. A transcript path works too, and so does
+nothing at all, which takes the newest session the query matched: `asf lucid --read`.
 
 The picker prints its own keys. README.md and RESEARCH_JOURNAL.md have the rest."
 )]
@@ -71,14 +73,14 @@ struct Args {
     /// the tab separated rows the picker gets, for checking
     #[arg(long)]
     rows: bool,
-    /// print a transcript as text. No PATH: the newest session the query matched
-    #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = "")]
+/// print a session as markdown. Nothing given: the newest session the query matched
+    #[arg(long, value_name = "SESSION", num_args = 0..=1, default_missing_value = "")]
     read: Option<String>,
-    /// one screen about a transcript: where it ran, its model, files it named, first and last words
-    #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = "")]
+    /// one screen about a session: where it ran, its model, files it named, first and last words
+    #[arg(long, value_name = "SESSION", num_args = 0..=1, default_missing_value = "")]
     preview: Option<String>,
-    /// print the command that reopens a transcript
-    #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = "")]
+    /// print the command that reopens a session
+    #[arg(long, value_name = "SESSION", num_args = 0..=1, default_missing_value = "")]
     resume: Option<String>,
     /// with --read, only the first N messages
     #[arg(long, default_value_t = 0)]
