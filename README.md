@@ -47,6 +47,13 @@ It searches with ripgrep's crates instead of an index: half a second over 3.7 GB
 cargo install --path .
 ```
 
+Cargo installs `asf` in `~/.cargo/bin`. Put that directory on `PATH` before running it:
+
+```sh
+echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
 One binary. It uses ripgrep's crates to search and skim's for the picker. A dependency
 change needs `cargo +nightly update`, for the 8 day publish-age hold in `.cargo/config.toml`.
 
