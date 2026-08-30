@@ -84,6 +84,13 @@ pub fn sessions() -> Vec<Row> {
         .collect()
 }
 
+/// The model column of one session. The file agents get this out of their records; hermes
+/// keeps it in a column of its own.
+pub fn model_of(path: &str) -> String {
+    let sql = format!("select coalesce(model,'') as model from sessions where id = '{}'", id_of(path));
+    query(&sql).first().map_or(String::new(), |row| text(row, "model"))
+}
+
 pub fn session_of(path: &str) -> Option<Row> {
     sessions().into_iter().find(|row| row.path == path)
 }

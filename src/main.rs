@@ -38,8 +38,9 @@ For pi that means every session with a name, since pi gives its own a uuid and o
 passes --session-id.
 --read exports the session as markdown, `## role` a message, the conversation only. --tools
 and --think put the tool calls and the reasoning back, a line each; --head and --tail cut it.
---read, --preview and --resume take a transcript path, or no path at all, in which case they
-take the newest session the query matched: `asf lucid --read` needs no path pasted in.
+--read, --preview and --resume take a transcript path, a session id out of a resume command,
+or nothing at all, in which case they take the newest session the query matched:
+`asf --read 019ffeb2-9c72-7ad0` and `asf lucid --read` both work.
 
 The picker prints its own keys. README.md and RESEARCH_JOURNAL.md have the rest."
 )]
@@ -237,7 +238,9 @@ fn main() {
     // a path given outright needs no scan; an empty one means "resolve it from the query"
     let one_of = [args.read.as_deref(), args.preview.as_deref(), args.resume.as_deref()];
     let wants_one = one_of.iter().any(|f| f.is_some());
-    if let Some(path) = one_of.into_iter().flatten().find(|p| !p.is_empty()) {
+    let given = one_of.into_iter().flatten().find(|p| !p.is_empty());
+    // a hermes session is <db>#<id>, which is no file on disk
+    if let Some(path) = given.filter(|p| Path::new(p).exists() || p.contains('#')) {
         one(&args, path);
     }
 
@@ -249,7 +252,17 @@ fn main() {
         }
     }
 
-    let query = args.query.join(" ");
+    // what is left is not a file, so it is a session id or a name: search for it. The resume
+    // command hands you an id, and that is what you have in front of you when you want to read
+    // the session back.
+    let mut query = args.query.join(" ");
+    if let Some(id) = given {
+        if !query.is_empty() {
+            eprintln!("asf: give a query or a session, not both: {query:?} and {id:?}");
+            std::process::exit(2);
+        }
+        query = id.to_string();
+    }
     let mut rows = if args.content && !query.is_empty() {
         sessions::search_content(&query, args.regex)
     } else {

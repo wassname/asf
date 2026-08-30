@@ -135,11 +135,48 @@ fn head_and_tail_cut_the_middle_out() {
     assert!(ends.len() < all.len(), "cutting the middle made it longer");
 }
 
+/// Every client, every field the preview reads out of it. One stub session per agent, so an
+/// agent that changes its format fails a row here instead of quietly showing a blank column.
+///
+/// The values are what the scrubber writes: a name it knows becomes `fixture <agent> <key>`,
+/// every other free text becomes the filler. "" is a field that store does not hold at all.
 #[test]
-fn preview_says_where_it_ran() {
-    let out = asf(&["--preview", &path_of("pi")]);
-    assert!(out.contains("/tmp/asf-fixture-repo"), "{out}");
-    assert!(out.contains("pi"), "{out}");
-    // the model it last ran on, beside the agent. The fixture scrubs the id to the filler.
-    assert!(out.contains("pi  the pi widget factory"), "no model in\n{out}");
+fn each_agent_gives_up_its_name_directory_and_model() {
+    let filler = |agent: &str| format!("the {agent} widget factory ships on tuesday");
+    let want = [
+        // agent, name, dir, model
+        ("claude", "fixture claude agentName", "/tmp/asf-fixture-repo", "filler"),
+        ("codex", "filler", "/tmp/asf-fixture-repo", "filler"),
+        ("pi", "fixture pi name", "/tmp/asf-fixture-repo", "filler"),
+        // gemini keeps one logs.json of prompts per project: no directory in it, no model
+        ("gemini", "filler", "fixture-project", ""),
+        ("opencode", "fixture opencode title", "/tmp/asf-fixture-repo", "filler"),
+        ("copilot", "filler", "/tmp/asf-fixture-repo", "filler"),
+        ("hermes", "fixture hermes 2", "/tmp/asf-fixture-repo", "fixture hermes model"),
+    ];
+    for (agent, name, dir, model) in want {
+        let out = asf(&["--preview", &path_of(agent)]).replace("\u{1b}[2m", "").replace("\u{1b}[0m", "");
+        let expect = |value: &str| if value == "filler" { filler(agent) } else { value.to_string() };
+        let client =
+            if model.is_empty() { agent.to_string() } else { format!("{agent}  {}", expect(model)) };
+        for line in [format!("client {client}"), format!("name   {}", expect(name)), format!("dir    {dir}")] {
+            assert!(out.contains(&line), "{agent}: no `{line}` in\n{out}");
+        }
+    }
+}
+
+/// The transcript path is what the picker and --paths hand you, but the resume command shows
+/// a session id, so that has to find the session too: every store keeps the id in the path.
+#[test]
+fn a_session_id_finds_its_session() {
+    for agent in ["claude", "codex", "pi", "opencode", "copilot", "hermes"] {
+        let path = path_of(agent);
+        let id = asf(&["--resume", &path]);
+        // cd 'dir' && claude --resume <id>, or copilot --resume=<id>
+        let id = id.split_whitespace().last().expect("no resume command");
+        let id = id.rsplit('=').next().unwrap().trim_end_matches('\'');
+        assert_eq!(asf(&["--paths", id]).trim(), path, "{agent}: id {id} is not a query");
+        // and the same id where a path is asked for
+        assert!(asf(&["--read", id]).contains("## "), "{agent}: --read {id} read nothing");
+    }
 }

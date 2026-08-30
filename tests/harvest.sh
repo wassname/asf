@@ -79,8 +79,9 @@ dst=$out/.pi/agent/sessions/--tmp-asf-fixture-repo--/${name%%_*}_rev-fixture-1.j
 take pi "$src" "$dst" 12
 sed -i "s/$id/rev-fixture-1/g" "$dst"
 
-# copilot
-src=$($asf --paths -a copilot -n 1)
+# copilot: the newest session whose header names a directory. Its oldest format has none,
+# and a fixture with no cwd cannot show that asf reads one.
+src=$($asf --paths -a copilot -n 40 | xargs grep -l '"cwd"' | sed -n 1p)
 take copilot "$src" "$out/.copilot/session-state/$(basename "$(dirname "$src")")/events.jsonl" 30
 
 # gemini: logs.json is one array for the whole project, not jsonl
@@ -122,10 +123,10 @@ insert into messages select id, session_id, role, content, tool_call_id, tool_ca
   select m.*, row_number() over (partition by m.session_id order by m.timestamp) as seq
   from real.messages m where m.session_id in (select id from sessions)) where seq <= 6;
 detach real;
-update sessions set title = 'fixture hermes ' || rowid, display_name = null, cwd = '/tmp/asf-fixture-repo',
+update sessions set model = 'fixture hermes model', title = 'fixture hermes ' || rowid, display_name = null, cwd = '/tmp/asf-fixture-repo',
   git_repo_root = '/tmp/asf-fixture-repo', system_prompt = null, origin_json = null, git_branch = null,
   session_key = null, chat_id = null, user_id = null, model_config = null, handoff_state = null,
-  model = null, billing_provider = null, billing_base_url = null, profile_name = null,
+  billing_provider = null, billing_base_url = null, profile_name = null,
   thread_id = null, handoff_platform = null, handoff_error = null, compression_failure_error = null,
   -- real spend and real token counts are telemetry about the person, not about the format
   estimated_cost_usd = 0, actual_cost_usd = 0, input_tokens = 0, output_tokens = 0,

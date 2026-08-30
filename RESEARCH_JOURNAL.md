@@ -42,6 +42,18 @@ sessions record a directory that no longer exists.
 - gemini writes some session files as `.json` and some as `.jsonl`, plus one `logs.json` of
   prompts per project
 - copilot labels turns `user.message` and `assistant.message`, with no `role` key
+- pi keeps its session name in a `session_info` record of its own, the same rewrite-and-keep
+  shape claude uses, so the last one is the live name. 40 of 1294 pi sessions here have one;
+  the rest never got named and still fall back to the opening message. Reading it is what
+  turned rows of "continue from @docs/HANDOVER.md pls" back into `worker` and `supervisor`
+- the model is a per-turn record, spelled `model` (claude, codex), `modelId` (pi), `modelID`
+  (opencode) or `selectedModel` (copilot, 154 of 175 sessions), so `--preview` takes the last
+  match in the file: that is what you were on when you stopped. hermes keeps it in a column
+  instead, `sessions.model`, set on 5 of 6 rows. gemini's `logs.json` is prompts only and has
+  no model anywhere
+- copilot writes cwd into `session.start` under `data.context`, 174 of 175 sessions. The one
+  without it is the oldest format, `version 1`, which is why the fixture is now a newer session:
+  a fixture with no cwd cannot show that asf reads one
 
 ## Search cost
 
@@ -90,6 +102,11 @@ Two fixture details are load-bearing. The claude file holds four stale copies of
 record and one live copy of each, because reading the first record instead of the last was a
 real bug. The hermes database holds a child session, because its `parent_session_id` is the
 whole subagent rule there.
+
+`each_agent_gives_up_its_name_directory_and_model` is the compatibility matrix: name, cwd and
+model per client, from that client's own stub session. A field a store genuinely does not hold
+is written `""` in the table (gemini has no model), so a gap is a decision in the test, not a
+blank nobody noticed.
 
 An audit of the first version found the fixtures too uniform to fail: every claude name record
 scrubbed to the same string, so first and last were the same value and the bug they exist to

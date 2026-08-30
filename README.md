@@ -10,6 +10,7 @@ asf -c "staging dir"       # sessions whose TRANSCRIPT matches, assistant text i
 asf -i steer               # pick one; enter prints the resume command
 asf --paths -c steer       # transcript paths, for piping
 asf --read PATH --tail 20  # the last 20 messages, as markdown; --tools --think keep those too
+asf --read SESSION_ID      # the id out of a resume command works too, as does `asf query --read`
 asf --preview PATH         # where it ran, its model, the files it named, first and last words
 asf --resume PATH          # the command that reopens it
 ```

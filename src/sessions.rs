@@ -650,7 +650,8 @@ pub fn preview(path: &str, at: u64) -> String {
 
     let raw = raw_text(path);
     let files = files_named(&raw);
-    let model = model_used(&raw);
+    let model =
+        if agent == "hermes" { hermes::model_of(path) } else { model_used(&raw) };
     let label = |name: &str, value: String| format!("\x1b[2m{name:7}\x1b[0m{value}");
     let mut out = vec![
         label("client", if model.is_empty() { agent.clone() } else { format!("{agent}  {model}") }),

@@ -29,6 +29,8 @@ KEYS = {
     "Down": "\x1b[B",
     "Right": "\x1b[C",
     "Left": "\x1b[D",
+    "CtrlUp": "\x1b[1;5A",
+    "CtrlDown": "\x1b[1;5B",
     "PageUp": "\x1b[5~",
     "PageDown": "\x1b[6~",
     "ShiftUp": "\x1b[1;2A",
