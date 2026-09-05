@@ -673,8 +673,11 @@ pub fn preview(path: &str, at: u64) -> String {
     }
     out.push(String::new());
     for block in ends(&said, 2, 6) {
-        // the pane renders ansi, so the role lines can carry the structure
         let shown = cut(&block, 700);
+        if shown.starts_with("---\n\n... ") {
+            out.push(shown);
+            continue;
+        }
         out.push(match shown.split_once('\n') {
             Some((role, body)) => format!("\x1b[1m{role}\x1b[0m\n{body}"),
             None => shown,
@@ -795,7 +798,10 @@ fn ends(blocks: &[String], head: usize, tail: usize) -> Vec<String> {
         return blocks.to_vec();
     }
     let mut kept: Vec<String> = blocks[..head].to_vec();
-    kept.push(format!("## ... {} messages ...", blocks.len() - head - tail));
+    kept.push(format!(
+        "---\n\n... {} messages omitted ...\n\n---",
+        blocks.len() - head - tail
+    ));
     kept.extend_from_slice(&blocks[blocks.len() - tail..]);
     kept
 }

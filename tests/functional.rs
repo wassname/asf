@@ -131,7 +131,8 @@ fn head_and_tail_cut_the_middle_out() {
     let path = path_of("codex");
     let all = asf(&["--read", &path]);
     let ends = asf(&["--read", &path, "--head", "1", "--tail", "1"]);
-    assert!(ends.contains("messages ..."), "{ends}");
+    assert!(ends.contains("\n---\n\n... "), "{ends}");
+    assert!(ends.contains(" messages omitted ...\n\n---\n"), "{ends}");
     assert!(ends.len() < all.len(), "cutting the middle made it longer");
 }
 

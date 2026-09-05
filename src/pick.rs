@@ -65,7 +65,9 @@ pub fn pick(tsv: String, filters: &str, query: &str) {
         cmd_query: Some(query.to_string()),
         prompt: "name> ".to_string(),
         cmd_prompt: "transcript> ".to_string(),
-        preview: Some(format!("{me} --preview {{2}} --line {{3}}")),
+        preview: Some(format!(
+            "{me} --preview {{2}} --line {{3}} | if command -v bat >/dev/null; then bat --color=always --paging=never --plain --language=markdown; else cat; fi"
+        )),
         preview_window: "down:65%:wrap".to_string(),
         bind: [
             agents,
