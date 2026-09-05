@@ -23,11 +23,8 @@ pub fn header_row() -> String {
 }
 
 pub fn pick(tsv: String, filters: &str, query: &str) {
-    let preview_style = if Command::new("bat").arg("--version").status().is_ok() {
-        "Markdown"
-    } else {
-        "plain (bat missing)"
-    };
+    let bat = Command::new("bat").arg("--version").status().is_ok();
+    let preview_style = if bat { "Markdown" } else { "plain (bat missing)" };
     let me = std::env::current_exe()
         .expect("cannot find my own path")
         .to_string_lossy()
@@ -71,9 +68,13 @@ pub fn pick(tsv: String, filters: &str, query: &str) {
         cmd_query: Some(query.to_string()),
         prompt: "name> ".to_string(),
         cmd_prompt: "transcript> ".to_string(),
-        preview: Some(format!(
-            "{me} --preview {{2}} --line {{3}} | if command -v bat >/dev/null; then bat --color=always --paging=never --plain --language=markdown; else cat; fi"
-        )),
+        preview: Some(if bat {
+            format!(
+                "{me} --preview {{2}} --line {{3}} | awk 'BEGIN {{ body = 0; bat = \"bat --color=always --paging=never --plain --language=markdown\" }} !body {{ print; if ($0 == \"\") body = 1; next }} {{ print | bat }} END {{ if (body) close(bat) }}'"
+            )
+        } else {
+            format!("{me} --preview {{2}} --line {{3}}")
+        }),
         preview_window: "down:65%:wrap".to_string(),
         bind: [
             agents,

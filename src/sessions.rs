@@ -672,17 +672,7 @@ pub fn preview(path: &str, at: u64) -> String {
         out.push(cut(&matched, 1200));
     }
     out.push(String::new());
-    for block in ends(&said, 2, 6) {
-        let shown = cut(&block, 700);
-        if shown.starts_with("---\n\n... ") {
-            out.push(shown);
-            continue;
-        }
-        out.push(match shown.split_once('\n') {
-            Some((role, body)) => format!("\x1b[1m{role}\x1b[0m\n{body}"),
-            None => shown,
-        });
-    }
+    out.extend(ends(&said, 2, 6).iter().map(|block| cut(block, 700)));
     out.join("\n")
 }
 
