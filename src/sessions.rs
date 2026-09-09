@@ -669,7 +669,7 @@ pub fn preview(path: &str, at: u64) -> String {
     // in name mode the match IS the first message, and printing it twice wastes the pane
     if !matched.is_empty() && said.first() != Some(&matched) {
         out.push(format!("--- match, line {at} ---"));
-        out.push(cut(&matched, 1200));
+        out.push(cut(&matched, 220));
     }
     out.push(String::new());
     out.extend(ends(&said, 1, 2).iter().map(|block| cut(block, 220)));
