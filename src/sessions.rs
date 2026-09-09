@@ -672,7 +672,7 @@ pub fn preview(path: &str, at: u64) -> String {
         out.push(cut(&matched, 1200));
     }
     out.push(String::new());
-    out.extend(ends(&said, 2, 6).iter().map(|block| cut(block, 700)));
+    out.extend(ends(&said, 1, 2).iter().map(|block| cut(block, 220)));
     out.join("\n")
 }
 

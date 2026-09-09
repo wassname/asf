@@ -4,7 +4,7 @@ use crate::record::Show;
 use crate::sessions::{SOURCES, read, resume_for_path, session_of};
 use skim::prelude::*;
 use std::io::Cursor;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /// Rows the picker holds. Every session fits: fuzzy matching a loaded row is what makes the
 /// name mode instant, and a row it never loaded is a row you cannot find.
@@ -23,7 +23,12 @@ pub fn header_row() -> String {
 }
 
 pub fn pick(tsv: String, filters: &str, query: &str) {
-    let bat = Command::new("bat").arg("--version").status().is_ok();
+    let bat = Command::new("bat")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok();
     let preview_style = if bat { "Markdown" } else { "plain (bat missing)" };
     let me = std::env::current_exe()
         .expect("cannot find my own path")

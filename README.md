@@ -41,8 +41,8 @@ It searches with ripgrep's crates instead of an index: half a second over 3.7 GB
 | pgdn, pgup | a page of rows |
 | ctrl-down, ctrl-up (alt too) | a page of the preview |
 
-The preview shows its first two and last six messages, with an omitted-message divider between.
-It uses `bat` to colour Markdown when `bat` is on `PATH`; otherwise it stays plain text.
+The preview shows its first and last two messages, with an omitted-message divider between.
+It uses `bat` to colour the transcript Markdown when `bat` is on `PATH`; otherwise it stays plain text.
 
 ## Install
 
