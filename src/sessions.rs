@@ -905,13 +905,17 @@ fn blocks(path: &str, at: u64, show: Show) -> Vec<String> {
         blocks.push(block);
     }
     if blocks.is_empty() {
-        // not jsonl: gemini's logs.json is one array for the whole project
-        if let Some(entry) = parse(&String::from_utf8_lossy(&raw)) {
-            let said: Vec<String> = texts(&entry)
-                .into_iter()
-                .filter(|t| !t.trim().is_empty())
-                .collect();
-            blocks.push(said.join("\n"));
+        // gemini keeps every prompt in one JSON array rather than one JSONL record per turn
+        if let Some(Value::Array(entries)) = parse(&String::from_utf8_lossy(&raw)) {
+            for entry in entries {
+                let said: Vec<String> = texts(&entry)
+                    .into_iter()
+                    .filter(|t| !t.trim().is_empty())
+                    .collect();
+                if !said.is_empty() {
+                    blocks.push(format!("## {}\n{}", role_of(&entry), said.join("\n")));
+                }
+            }
         }
     }
     blocks

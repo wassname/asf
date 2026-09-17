@@ -312,10 +312,15 @@ fn only_role(text: &str, role: &str) {
 
 #[test]
 fn role_filtering_keeps_roles_before_tail_across_formats() {
-    for agent in ["claude", "codex", "pi", "hermes"] {
+    for agent in [
+        "claude", "codex", "pi", "opencode", "copilot", "gemini", "hermes",
+    ] {
         let path = path_of(agent);
         let users = asf(&["-r", &path, "--role", "user", "--tail", "1"]);
         only_role(&users, "user");
+    }
+    for agent in ["claude", "codex", "pi", "opencode", "copilot", "hermes"] {
+        let path = path_of(agent);
         let assistants = asf(&["-r", &path, "--role", "assistant", "--tail", "1"]);
         only_role(&assistants, "assistant");
     }
