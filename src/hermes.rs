@@ -46,14 +46,20 @@ fn query(sql: &str) -> Vec<Value> {
         }
     };
     if !out.status.success() {
-        once(format!("asf: hermes: {}", String::from_utf8_lossy(&out.stderr).trim()));
+        once(format!(
+            "asf: hermes: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
         return Vec::new();
     }
     serde_json::from_slice(&out.stdout).unwrap_or_default()
 }
 
 fn text(row: &Value, key: &str) -> String {
-    row.get(key).and_then(Value::as_str).unwrap_or_default().to_string()
+    row.get(key)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// Every hermes session. The name it was given, else the first thing you said to it.
@@ -73,7 +79,11 @@ pub fn sessions() -> Vec<Row> {
                 path: path_of(&text(row, "id")),
                 agent: "hermes".to_string(),
                 cwd: text(row, "cwd"),
-                title: if name.is_empty() { opening.clone() } else { name },
+                title: if name.is_empty() {
+                    opening.clone()
+                } else {
+                    name
+                },
                 opening,
                 mtime: row.get("at").and_then(Value::as_f64).unwrap_or_default(),
                 // hermes records the session that spawned this one, which is the whole rule
@@ -87,8 +97,13 @@ pub fn sessions() -> Vec<Row> {
 /// The model column of one session. The file agents get this out of their records; hermes
 /// keeps it in a column of its own.
 pub fn model_of(path: &str) -> String {
-    let sql = format!("select coalesce(model,'') as model from sessions where id = '{}'", id_of(path));
-    query(&sql).first().map_or(String::new(), |row| text(row, "model"))
+    let sql = format!(
+        "select coalesce(model,'') as model from sessions where id = '{}'",
+        id_of(path)
+    );
+    query(&sql)
+        .first()
+        .map_or(String::new(), |row| text(row, "model"))
 }
 
 pub fn session_of(path: &str) -> Option<Row> {

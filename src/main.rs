@@ -17,9 +17,26 @@ mod record;
 mod scan;
 mod sessions;
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use sessions::{Row, SOURCES};
 use std::path::Path;
+
+#[derive(Clone, Copy, ValueEnum)]
+enum Role {
+    User,
+    Assistant,
+    Tool,
+}
+
+impl Role {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Assistant => "assistant",
+            Self::Tool => "tool",
+        }
+    }
+}
 
 #[derive(Parser)]
 #[command(
@@ -37,12 +54,18 @@ renamed part way through, this is the name it ended with.
 Runs an agent started for itself are hidden, because you cannot resume them. --sub shows them.
 For pi that means every session with a name, since pi gives its own a uuid and only a tool
 passes --session-id.
---read exports the session as markdown, `## role` a message, the conversation only. --tools
+
+Read your current Pi transcript when you need exact earlier wording, decisions, or context:
+`asf -r \"$PI_INTERCOM_SESSION_ID\" --tail 40`.
+
+-r/--read exports the session as markdown, `## role` a message, the conversation only. --tools
 and --think put the tool calls and the reasoning back, a line each; --head and --tail cut it.
-SESSION is the id in the resume command asf just printed you, which is also the id your agent
-shows. `asf --resume lucid` says `codex resume 019ffeb2-9c72-7ad0`, so `asf --read 019ffeb2` or
-`asf --preview 019ffeb2` reads that same session back. A transcript path works too, and so does
-nothing at all, which takes the newest session the query matched: `asf lucid --read`.
+--role user, assistant, or tool filters records before --head and --tail. --role tool enables
+--tools: it selects tool records, while --tools also retains tool details in user and assistant
+records. SESSION is the id in the resume command asf just printed you, which is also the id your
+agent shows. `asf -u lucid` says `codex resume 019ffeb2-9c72-7ad0`, so `asf -r 019ffeb2` or
+`asf -p 019ffeb2` reads that same session back. A transcript path works too, and so does nothing
+at all, which takes the newest session the query matched: `asf lucid -r`.
 
 The picker prints its own keys. README.md and RESEARCH_JOURNAL.md have the rest."
 )]
@@ -73,15 +96,18 @@ struct Args {
     /// the tab separated rows the picker gets, for checking
     #[arg(long)]
     rows: bool,
-/// print a session as markdown. Nothing given: the newest session the query matched
-    #[arg(long, value_name = "SESSION", num_args = 0..=1, default_missing_value = "")]
+    /// print a session as markdown. Nothing given: the newest session the query matched
+    #[arg(short = 'r', long, value_name = "SESSION", num_args = 0..=1, default_missing_value = "")]
     read: Option<String>,
     /// one screen about a session: where it ran, its model, files it named, first and last words
-    #[arg(long, value_name = "SESSION", num_args = 0..=1, default_missing_value = "")]
+    #[arg(short = 'p', long, value_name = "SESSION", num_args = 0..=1, default_missing_value = "")]
     preview: Option<String>,
     /// print the command that reopens a session
-    #[arg(long, value_name = "SESSION", num_args = 0..=1, default_missing_value = "")]
+    #[arg(short = 'u', long, value_name = "SESSION", num_args = 0..=1, default_missing_value = "")]
     resume: Option<String>,
+    /// with --read, keep only user, assistant, or tool records; --role tool also enables --tools
+    #[arg(long, value_enum, requires = "read")]
+    role: Option<Role>,
     /// with --read, only the first N messages
     #[arg(long, default_value_t = 0)]
     head: usize,
@@ -119,7 +145,11 @@ fn project(row: &Row) -> String {
 
 fn or_dash(text: &str, width: usize) -> String {
     let short = record::cut(text, width);
-    if short.is_empty() { "-".to_string() } else { short }
+    if short.is_empty() {
+        "-".to_string()
+    } else {
+        short
+    }
 }
 
 /// The column beside the name: why the row matched, or what you opened the session with.
@@ -128,7 +158,11 @@ fn said(row: &Row) -> &str {
         return &row.matched;
     }
     // a name replaced the opening message in the title, so there is room to show both
-    if row.opening != row.title { &row.opening } else { "" }
+    if row.opening != row.title {
+        &row.opening
+    } else {
+        ""
+    }
 }
 
 fn table(rows: &[Row], content: bool) -> String {
@@ -170,7 +204,10 @@ fn table(rows: &[Row], content: bool) -> String {
         })
         .collect();
     let pad = |cell: &str, width: usize| {
-        format!("{cell}{}", " ".repeat(width.saturating_sub(cell.chars().count())))
+        format!(
+            "{cell}{}",
+            " ".repeat(width.saturating_sub(cell.chars().count()))
+        )
     };
     let row_line = |cells: &Vec<String>| {
         let padded: Vec<String> = cells.iter().zip(&widths).map(|(c, w)| pad(c, *w)).collect();
@@ -181,7 +218,11 @@ fn table(rows: &[Row], content: bool) -> String {
         row_line(&head),
         format!(
             "|{}|",
-            widths.iter().map(|w| "-".repeat(w + 2)).collect::<Vec<_>>().join("|")
+            widths
+                .iter()
+                .map(|w| "-".repeat(w + 2))
+                .collect::<Vec<_>>()
+                .join("|")
         ),
     ];
     lines.extend(body.iter().map(row_line));
@@ -218,8 +259,18 @@ fn rows_tsv(rows: &[Row]) -> String {
 /// Whichever of --read/--preview/--resume was asked for, against one transcript.
 fn one(args: &Args, path: &str) -> ! {
     let out = if args.read.is_some() {
-        let show = record::Show { tools: args.tools, think: args.think };
-        sessions::read(path, args.head, args.tail, args.line, show)
+        let show = record::Show {
+            tools: args.tools || matches!(args.role, Some(Role::Tool)),
+            think: args.think,
+        };
+        sessions::read(
+            path,
+            args.head,
+            args.tail,
+            args.line,
+            show,
+            args.role.map(Role::as_str),
+        )
     } else if args.preview.is_some() {
         sessions::preview(path, args.line)
     } else {
@@ -238,20 +289,16 @@ fn main() {
     let args = Args::parse();
 
     // a path given outright needs no scan; an empty one means "resolve it from the query"
-    let one_of = [args.read.as_deref(), args.preview.as_deref(), args.resume.as_deref()];
+    let one_of = [
+        args.read.as_deref(),
+        args.preview.as_deref(),
+        args.resume.as_deref(),
+    ];
     let wants_one = one_of.iter().any(|f| f.is_some());
     let given = one_of.into_iter().flatten().find(|p| !p.is_empty());
     // a hermes session is <db>#<id>, which is no file on disk
     if let Some(path) = given.filter(|p| Path::new(p).exists() || p.contains('#')) {
         one(&args, path);
-    }
-
-    // a store that moved or got renamed would otherwise just go quiet
-    for (agent, _) in SOURCES {
-        let store = sessions::store(agent);
-        if !store.exists() {
-            eprintln!("asf: no {agent} store at {}", store.display());
-        }
     }
 
     // what is left is not a file, so it is a session id or a name: search for it. The resume
@@ -270,7 +317,11 @@ fn main() {
     } else {
         let mut rows = sessions::load_sessions();
         if !query.is_empty() {
-            let wanted = if args.regex { query.clone() } else { regex::escape(&query) };
+            let wanted = if args.regex {
+                query.clone()
+            } else {
+                regex::escape(&query)
+            };
             let pattern = match regex::Regex::new(&format!("(?i){wanted}")) {
                 Ok(pattern) => pattern,
                 Err(err) => {
@@ -311,9 +362,23 @@ fn main() {
             eprintln!("asf: nothing matched {query:?}");
             std::process::exit(1);
         };
-        if total > 1 {
-            eprintln!("asf: {total} matched, taking the newest: {}", record::cut(&row.title, 60));
-        }
+        let action = if args.read.is_some() {
+            "reading"
+        } else if args.preview.is_some() {
+            "previewing"
+        } else {
+            "resuming"
+        };
+        let shown = total.min(3);
+        let selection = if total == 1 {
+            "the only match".to_string()
+        } else {
+            format!("the newest of {total} matches (top {shown} shown)")
+        };
+        eprintln!(
+            "asf: {action} {selection}:\n{}",
+            table(&rows[..shown], args.content)
+        );
         one(&args, &row.path.clone());
     }
     if args.pick {
@@ -340,7 +405,10 @@ fn main() {
         rows.truncate(args.limit);
         sessions::hydrate(&mut rows, &query);
         println!("{}", table(&rows, args.content));
-        println!("\n{total} sessions matched, showing {}", total.min(args.limit));
+        println!(
+            "\n{total} sessions matched, showing {}",
+            total.min(args.limit)
+        );
     } else {
         println!("nothing matched");
     }
