@@ -43,6 +43,17 @@ impl Role {
     name = "asf",
     about = "Find a past coding-agent session by name, or by anything said inside it",
     after_help = "\
+Examples:
+  asf lucid                  list sessions whose name, project or first message says lucid
+  asf -c \"staging dir\"       search everything said in each session, not only the name
+  asf lucid -r --tail 40     read the newest match as markdown, last 40 messages
+  asf -r 019ffeb2            read by session id, a prefix is enough
+  asf -r <file.jsonl>        read by transcript path
+  asf -p lucid               one-screen preview of the newest match
+  asf -u lucid               print the command that reopens it, and so its id
+
+-n is --limit (rows to print), not a name: the name is the plain query word.
+
 Name search, the default, matches the session's own name, its project, and the first thing
 you said. Content search, -c, reads every message, what the assistant said and what tools
 printed included. Both take a literal phrase and ignore case; --re opts into a pattern.
