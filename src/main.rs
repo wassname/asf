@@ -7,9 +7,6 @@
 //!     asf --read 019ffeb2      that session as markdown, by the id its resume command shows
 //!     asf --paths -c steer     just the transcript paths, for piping
 //!
-//! No index. The scan reads all 3.4 GB of transcripts in about a second, so there is nothing
-//! to build and nothing to go stale. Stopping each file at its first hit is what keeps a
-//! common word from returning 200k rows.
 
 mod hermes;
 mod pick;
@@ -19,7 +16,11 @@ mod sessions;
 
 use clap::Parser;
 use sessions::{Row, SOURCES};
+use std::io::{BufReader, BufWriter, Cursor, Write};
+use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Parser)]
 #[command(
@@ -73,6 +74,8 @@ struct Args {
     /// the tab separated rows the picker gets, for checking
     #[arg(long)]
     rows: bool,
+    #[arg(long, hide = true)]
+    stream_rows: bool,
 /// print a session as markdown. Nothing given: the newest session the query matched
     #[arg(long, value_name = "SESSION", num_args = 0..=1, default_missing_value = "")]
     read: Option<String>,
@@ -215,6 +218,24 @@ fn rows_tsv(rows: &[Row]) -> String {
         .join("\n")
 }
 
+fn stream_rows(
+    query: &str,
+    regex: bool,
+    agent: Option<&str>,
+    sub: bool,
+    stop: &AtomicBool,
+    output: impl Write,
+) {
+    let mut writer = BufWriter::new(output);
+    let mut count = 0;
+    sessions::stream_names(query, regex, agent, sub, stop, |row| {
+        count += 1;
+        count <= pick::ROWS
+            && writeln!(writer, "{}", rows_tsv(&[row])).is_ok()
+            && writer.flush().is_ok()
+    });
+}
+
 /// Whichever of --read/--preview/--resume was asked for, against one transcript.
 fn one(args: &Args, path: &str) -> ! {
     let out = if args.read.is_some() {
@@ -264,6 +285,41 @@ fn main() {
             std::process::exit(2);
         }
         query = id.to_string();
+    }
+    if (args.pick || args.stream_rows) && !args.content {
+        if let Some(agent) = &args.agent {
+            if !SOURCES.iter().any(|(a, _)| a == agent) {
+                eprintln!("asf: no such agent {agent:?}");
+                std::process::exit(2);
+            }
+        }
+        if args.regex && let Err(err) = regex::Regex::new(&format!("(?i){query}")) {
+            eprintln!("asf: bad pattern {query:?}: {err}");
+            std::process::exit(1);
+        }
+        if args.stream_rows {
+            stream_rows(&query, args.regex, args.agent.as_deref(), args.sub, &AtomicBool::new(false), std::io::stdout().lock());
+            return;
+        }
+        let (reader, writer) = UnixStream::pair().expect("cannot open picker stream");
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker_stop = stop.clone();
+        let worker_query = query.clone();
+        let worker_agent = args.agent.clone();
+        let sub = args.sub;
+        let regex = args.regex;
+        std::thread::spawn(move || {
+            stream_rows(&worker_query, regex, worker_agent.as_deref(), sub, &worker_stop, writer);
+        });
+        let filters = match (&args.agent, args.sub) {
+            (Some(agent), true) => format!(" -a {agent} --sub"),
+            (Some(agent), false) => format!(" -a {agent}"),
+            (None, true) => " --sub".to_string(),
+            (None, false) => String::new(),
+        };
+        pick::pick(Box::new(BufReader::new(reader)), &filters, &query);
+        stop.store(true, Ordering::Relaxed);
+        return;
     }
     let mut rows = if args.content && !query.is_empty() {
         sessions::search_content(&query, args.regex)
@@ -327,7 +383,7 @@ fn main() {
         if args.sub {
             filters.push_str(" --sub");
         }
-        pick::pick(rows_tsv(&rows), &filters, &query);
+        pick::pick(Box::new(Cursor::new(rows_tsv(&rows))), &filters, &query);
     } else if args.rows {
         rows.truncate(args.limit);
         sessions::hydrate(&mut rows, &query);

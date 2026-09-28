@@ -3,7 +3,7 @@
 use crate::record::Show;
 use crate::sessions::{SOURCES, read, resume_for_path, session_of};
 use skim::prelude::*;
-use std::io::Cursor;
+use std::io::BufRead;
 use std::process::{Command, Stdio};
 
 /// Rows the picker holds. Every session fits: fuzzy matching a loaded row is what makes the
@@ -22,7 +22,7 @@ pub fn header_row() -> String {
         .join(" ")
 }
 
-pub fn pick(tsv: String, filters: &str, query: &str) {
+pub fn pick(source: Box<dyn BufRead + Send>, filters: &str, query: &str) {
     let bat = Command::new("bat")
         .arg("--version")
         .stdout(Stdio::null())
@@ -53,7 +53,7 @@ pub fn pick(tsv: String, filters: &str, query: &str) {
             .with_nth(["1"].into_iter()),
     );
     let collector = Rc::new(RefCell::new(reader));
-    let items = collector.borrow().of_bufread(Cursor::new(tsv));
+    let items = collector.borrow().of_bufread(source);
 
     let options = SkimOptions {
         delimiter: "\t".to_string(),

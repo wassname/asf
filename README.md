@@ -25,11 +25,14 @@ you can open, not a name you have to hunt for.
 ```
 <img width="1173" height="180" alt="image" src="https://github.com/user-attachments/assets/64254e7f-a91f-45e4-b22b-06e890c8e8f5" />
 
-It searches with ripgrep's crates instead of an index: half a second over 3.7 GB of jsonl.
+It searches with ripgrep's crates instead of an index. The earlier half-second measurement
+was on 3.7 GB of transcripts; a complete scan now takes much longer on a 13 GB Pi store.
 
 ## The picker
 
-`asf -i` loads every session, newest first, and filters them by substring as you type.
+`asf -i` opens immediately and adds sessions newest first as it scans. You can select a
+recent session without waiting for older transcripts. Name queries filter as rows arrive.
+`ctrl-q` transcript search still scans the whole store before it shows matches.
 
 | key | |
 |---|---|

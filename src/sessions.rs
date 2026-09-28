@@ -6,6 +6,7 @@ use crate::scan::{self, Hits, JSONISH, Scan};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Every session store on this machine. Add an agent by adding a line. Content search works
 /// on any of them; names need one line in NAME_PATTERNS or in load_sessions.
@@ -106,6 +107,21 @@ impl Rows {
             );
         }
         self.by_path.get_mut(path).unwrap()
+    }
+
+    fn add_name(&mut self, path: &str, found: Found) {
+        let row = self.touch(path);
+        if row.cwd.is_empty() {
+            row.cwd = found.cwd;
+        }
+        if found.line != 0 {
+            row.line = found.line;
+            row.opening = found.title.clone();
+        }
+        if (found.force && !found.title.is_empty()) || row.title.is_empty() {
+            row.title = found.title;
+        }
+        row.sub |= found.sub;
     }
 
     pub fn into_vec(self) -> Vec<Row> {
@@ -378,21 +394,7 @@ fn typed_names(rows: &mut [Row]) {
 /// One row per session: agent, path, mtime, cwd, title.
 pub fn load_sessions() -> Vec<Row> {
     let mut rows = Rows::default();
-    name_sessions(&stores_for_names(), |path, found| {
-        let row = rows.touch(path);
-        if row.cwd.is_empty() {
-            row.cwd = found.cwd;
-        }
-        if found.line != 0 {
-            // only the first-message pass reports a line, and that message is the opening
-            row.line = found.line;
-            row.opening = found.title.clone();
-        }
-        if (found.force && !found.title.is_empty()) || row.title.is_empty() {
-            row.title = found.title;
-        }
-        row.sub |= found.sub;
-    });
+    name_sessions(&stores_for_names(), |path, found| rows.add_name(path, found));
     let mut rows = rows.into_vec();
     for row in &mut rows {
         if row.agent == "gemini" && row.cwd.is_empty() {
@@ -408,6 +410,74 @@ pub fn load_sessions() -> Vec<Row> {
     // hermes has its own reader: its sessions are rows in a database, not files
     rows.extend(hermes::sessions());
     rows
+}
+
+pub fn stream_names(
+    query: &str,
+    regex: bool,
+    agent: Option<&str>,
+    sub: bool,
+    stop: &AtomicBool,
+    mut send: impl FnMut(Row) -> bool,
+) {
+    let wanted = if regex { query.to_string() } else { regex::escape(query) };
+    let pattern = regex::Regex::new(&format!("(?i){wanted}")).expect("bad query");
+    enum Candidate {
+        File(String, PathBuf),
+        Hermes(Row),
+    }
+    let mut files: Vec<(f64, Candidate)> = stores_for_names()
+        .into_iter()
+        .filter(|(source, _)| agent.is_none_or(|a| a == source))
+        .flat_map(|(source, roots)| {
+            roots.into_iter().take(if source == "gemini" { 1 } else { usize::MAX }).flat_map(move |root| {
+                scan::json_files(&root).into_iter().map({
+                    let source = source.clone();
+                    move |path| {
+                        let changed = mtime(&path.to_string_lossy());
+                        (changed, Candidate::File(source.clone(), path))
+                    }
+                })
+            })
+        })
+        .collect();
+    if agent.is_none_or(|a| a == "hermes") {
+        files.extend(hermes::sessions().into_iter().map(|row| (row.mtime, Candidate::Hermes(row))));
+    }
+    files.sort_by(|a, b| b.0.total_cmp(&a.0));
+    for (changed, candidate) in files {
+        if stop.load(Ordering::Relaxed) {
+            return;
+        }
+        let mut rows = match candidate {
+            Candidate::File(source, path) => {
+                let mut rows = Rows::default();
+                name_sessions(&[(source, vec![path])], |path, found| rows.add_name(path, found));
+                rows.into_vec()
+            }
+            Candidate::Hermes(row) => vec![row],
+        };
+        typed_names(&mut rows);
+        for mut row in rows {
+            row.mtime = changed;
+            if row.agent == "gemini" && row.cwd.is_empty() {
+                let parts: Vec<_> = Path::new(&row.path).components().collect();
+                if parts.len() >= 3 {
+                    row.cwd = parts[parts.len() - 3].as_os_str().to_string_lossy().to_string();
+                }
+            }
+            if (sub || !row.sub)
+                && (query.is_empty()
+                    || pattern.is_match(&row.title)
+                    || pattern.is_match(&row.opening)
+                    || pattern.is_match(&row.path)
+                    || pattern.is_match(&row.cwd))
+                && !send(row)
+            {
+                return;
+            }
+        }
+    }
 }
 
 pub fn day(mtime: f64, format: &str) -> String {

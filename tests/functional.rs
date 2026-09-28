@@ -47,6 +47,22 @@ fn the_name_is_the_one_the_agent_ended_with() {
 }
 
 #[test]
+fn streaming_names_match_the_complete_scan() {
+    let ordered = asf(&["--stream-rows"]);
+    let dates: Vec<_> = ordered.lines().map(|line| &line[..16]).collect();
+    assert!(dates.windows(2).all(|pair| pair[0] >= pair[1]), "not newest first:\n{ordered}");
+    for args in [vec![], vec!["fixture"], vec!["nothing said this"], vec!["--sub"], vec!["-a", "pi"]] {
+        let mut complete = asf(&["--rows", "-n", "20"].into_iter().chain(args.iter().copied()).collect::<Vec<_>>())
+            .lines().filter(|line| !line.is_empty()).map(str::to_owned).collect::<Vec<_>>();
+        let mut streamed = asf(&["--stream-rows"].into_iter().chain(args.iter().copied()).collect::<Vec<_>>())
+            .lines().map(str::to_owned).collect::<Vec<_>>();
+        complete.sort();
+        streamed.sort();
+        assert_eq!(streamed, complete, "{args:?}");
+    }
+}
+
+#[test]
 fn a_name_search_matches_the_name_and_the_opening_message() {
     assert!(asf(&["fixture", "claude"]).contains("1 sessions matched"));
     assert!(asf(&["gemini widget"]).contains("1 sessions matched"));

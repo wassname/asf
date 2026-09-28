@@ -148,6 +148,19 @@ pub fn search(pattern: &str, paths: &[PathBuf], scan: &Scan) -> Hits {
 }
 
 /// Every `ses_*.json` under a directory, or the file itself.
+pub fn json_files(root: &Path) -> Vec<PathBuf> {
+    if !root.exists() {
+        return Vec::new();
+    }
+    WalkBuilder::new(root)
+        .overrides(globs(&JSONISH))
+        .build()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
+        .map(|e| e.into_path())
+        .collect()
+}
+
 pub fn files_under(root: &Path, prefix: &str) -> Vec<PathBuf> {
     if !root.exists() {
         return Vec::new();
