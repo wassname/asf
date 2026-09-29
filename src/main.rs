@@ -76,8 +76,8 @@ struct Args {
     rows: bool,
     #[arg(long, hide = true)]
     stream_rows: bool,
-/// print a session as markdown. Nothing given: the newest session the query matched
-    #[arg(long, value_name = "SESSION", num_args = 0..=1, default_missing_value = "")]
+    /// print a session as markdown. Nothing given: the newest session the query matched
+    #[arg(short, long, value_name = "SESSION", num_args = 0..=1, default_missing_value = "")]
     read: Option<String>,
     /// one screen about a session: where it ran, its model, files it named, first and last words
     #[arg(long, value_name = "SESSION", num_args = 0..=1, default_missing_value = "")]
@@ -265,6 +265,11 @@ fn main() {
     // a hermes session is <db>#<id>, which is no file on disk
     if let Some(path) = given.filter(|p| Path::new(p).exists() || p.contains('#')) {
         one(&args, path);
+    }
+    // a missing path would fall through to the search below and scan every transcript for it
+    if let Some(p) = given.filter(|p| p.contains('/') || p.ends_with(".jsonl") || p.ends_with(".json")) {
+        eprintln!("asf: no such session file: {p}");
+        std::process::exit(2);
     }
 
     // a store that moved or got renamed would otherwise just go quiet

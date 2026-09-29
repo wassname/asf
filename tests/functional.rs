@@ -197,3 +197,19 @@ fn a_session_id_finds_its_session() {
         assert!(asf(&["--read", id]).contains("## "), "{agent}: --read {id} read nothing");
     }
 }
+
+/// -r is --read. A path that is not there fails at once, instead of searching every transcript
+/// for its text.
+#[test]
+fn a_missing_session_file_fails_fast() {
+    let path = path_of("pi");
+    assert_eq!(asf(&["-r", &path]), asf(&["--read", &path]));
+    for missing in ["/nonexistent/s.jsonl", "gone.jsonl"] {
+        let start = std::time::Instant::now();
+        let out = Command::new(env!("CARGO_BIN_EXE_asf")).args(["-r", missing]).env("HOME", HOME).output().unwrap();
+        assert_eq!(out.status.code(), Some(2), "{missing}: should fail");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("no such session file"), "{missing}: stderr was {err:?}");
+        assert!(start.elapsed().as_secs() < 2, "{missing}: took {:?}", start.elapsed());
+    }
+}
