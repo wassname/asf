@@ -47,14 +47,15 @@ pub const JUNK: [&str; 17] = [
 ];
 
 /// what the session did, not what it said
-const SKIP_BLOCKS: [&str; 8] = [
-    "tool_use",
-    "tool_result",
+const SKIP_BLOCKS: [&str; 9] = [
+    "tooluse",
+    "toolcall",
+    "toolresult",
     "thinking",
-    "redacted_thinking",
+    "redactedthinking",
     "image",
-    "function_call",
-    "function_call_output",
+    "functioncall",
+    "functioncalloutput",
     "reasoning",
 ];
 
@@ -89,10 +90,17 @@ pub fn texts(entry: &Value) -> Vec<String> {
     while let Some(node) = stack.pop() {
         match node {
             Value::Object(map) => {
-                if let Some(Value::String(kind)) = map.get("type")
-                    && SKIP_BLOCKS.contains(&kind.as_str()) {
-                        continue;
-                    }
+                let kind: String = map
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .chars()
+                    .filter(char::is_ascii_alphabetic)
+                    .collect::<String>()
+                    .to_lowercase();
+                if SKIP_BLOCKS.contains(&kind.as_str()) {
+                    continue;
+                }
                 for key in ["text", "content", "message"] {
                     if let Some(Value::String(said)) = map.get(key) {
                         found.push(said.clone());
@@ -133,7 +141,9 @@ pub fn extras(entry: &Value, show: Show) -> Vec<String> {
                     .collect::<String>()
                     .to_lowercase();
                 let tool = kind.contains("tool") || kind.starts_with("functioncall");
-                let done = ["result", "output", "complete"].iter().any(|e| kind.ends_with(e));
+                let done = ["result", "output", "complete"]
+                    .iter()
+                    .any(|e| kind.ends_with(e));
                 if show.tools && tool && !done {
                     // opencode keeps the args under state, everyone else names them
                     let name = ["name", "tool", "toolName", "tool_name"]
@@ -155,7 +165,11 @@ pub fn extras(entry: &Value, show: Show) -> Vec<String> {
                     found.push(format!("- -> {}", clean(&out, 200)));
                 } else if show.think && (kind.contains("thinking") || kind == "reasoning") {
                     let said = find_value(node, "thinking");
-                    let said = if said.is_empty() { find_value(node, "text") } else { said };
+                    let said = if said.is_empty() {
+                        find_value(node, "text")
+                    } else {
+                        said
+                    };
                     found.push(format!("> {}", clean(&said, 4000)));
                 }
                 stack.extend(map.values());
@@ -199,7 +213,10 @@ pub fn role_of(entry: &Value) -> String {
 
 pub fn clean(text: &str, width: usize) -> String {
     let stripped = TAGS.replace_all(text, " ");
-    cut(&stripped.split_whitespace().collect::<Vec<_>>().join(" "), width)
+    cut(
+        &stripped.split_whitespace().collect::<Vec<_>>().join(" "),
+        width,
+    )
 }
 
 /// The part of the text around the match, so the row shows why it matched.
@@ -222,7 +239,10 @@ pub fn window(text: &str, query: &str, width: usize) -> String {
             .saturating_sub(width / 3)
     });
     let around: String = stripped.chars().skip(start).take(width * 2).collect();
-    cut(&around.split_whitespace().collect::<Vec<_>>().join(" "), width)
+    cut(
+        &around.split_whitespace().collect::<Vec<_>>().join(" "),
+        width,
+    )
 }
 
 static ATTACHMENT: LazyLock<Regex> =

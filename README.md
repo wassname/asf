@@ -9,11 +9,26 @@ asf steer                  # sessions whose NAME matches
 asf -c "staging dir"       # sessions whose TRANSCRIPT matches, assistant text included
 asf -i steer               # pick one; enter prints the resume command
 asf --paths -c steer       # transcript paths, for piping
-asf --read 019ffeb2        # that session as markdown, by the id its resume command shows
-asf --read 019ffeb2 --tail 20  # its last 20 messages; --tools --think keep those too
-asf --preview 019ffeb2     # where it ran, its model, the files it named, first and last words
-asf --resume steer         # the command that reopens the newest session named steer
+asf -r 019ffeb2            # that session as markdown, by the id its resume command shows
+asf -r 019ffeb2 --tail 20  # its last 20 messages; --tools --think keep those too
+asf -p 019ffeb2            # where it ran, its model, the files it named, first and last words
+asf -u steer               # the command that reopens the newest session named steer
 ```
+
+Read your current Pi transcript when you need exact earlier wording, decisions, or context:
+
+```sh
+asf -r "$PI_INTERCOM_SESSION_ID" --tail 40
+```
+
+`-r`, `-p`, and `-u` are short forms of `--read`, `--preview`, and `--resume`. `--role
+user|assistant|tool` filters a read before `--head` and `--tail`. `--role tool` enables
+`--tools` and selects tool records; `--tools` also retains tool details inside user and assistant
+records.
+
+When a query resolves `-r`, `-p`, or `-u`, asf prints its choice and up to two next matches on
+stderr. The transcript, preview, or resume command stays on stdout. No matching sessions fail
+explicitly. Stores for agents you do not have are ignored.
 
 Every row carries the transcript path, so the answer to "which session was that" is a path
 you can open, not a name you have to hunt for.
@@ -89,3 +104,5 @@ Compaction is the other neighbour: [pi-vcc](https://github.com/sting8k/pi-vcc) s
 live pi session by extraction rather than by asking a model, after
 [lllyasviel/VCC](https://github.com/lllyasviel/VCC). asf reads finished sessions, so the two
 do not overlap, but the head, tail and files layout of `asf --preview` is the same idea.
+
+<!-- PI[gpt-5.6-terra]: updated CLI examples and self-reading guidance. -->

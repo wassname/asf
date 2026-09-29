@@ -41,7 +41,11 @@ const NAME_PATTERNS: [(&str, &str, &str); 5] = [
     ("claude", r#""type":"user""#, ""),
     ("codex", r#""role":"user""#, r#""type":"session_meta""#),
     ("pi", r#""role":"user""#, r#""type":"session""#),
-    ("copilot", r#""type": ?"user\."#, r#""type": ?"session\.start""#),
+    (
+        "copilot",
+        r#""type": ?"user\."#,
+        r#""type": ?"session\.start""#,
+    ),
     ("gemini", r#""type":"user""#, r#""projectHash""#),
 ];
 
@@ -50,7 +54,10 @@ pub fn home() -> PathBuf {
 }
 
 pub fn store(agent: &str) -> PathBuf {
-    let (_, tail) = SOURCES.iter().find(|(a, _)| *a == agent).expect("no such agent");
+    let (_, tail) = SOURCES
+        .iter()
+        .find(|(a, _)| *a == agent)
+        .expect("no such agent");
     home().join(tail)
 }
 
@@ -146,12 +153,24 @@ pub fn agent_of(path: &str) -> String {
 /// The id its own agent wants back. Claude subagent logs resume their parent.
 pub fn session_id(path: &str, agent: &str) -> String {
     let p = Path::new(path);
-    let stem = p.file_stem().unwrap_or_default().to_string_lossy().to_string();
-    let dir = |up: &Path| up.file_name().unwrap_or_default().to_string_lossy().to_string();
-    if p.parent().and_then(Path::file_name).is_some_and(|n| n == "subagents")
-        && let Some(parent) = p.parent().and_then(Path::parent) {
-            return dir(parent);
-        }
+    let stem = p
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let dir = |up: &Path| {
+        up.file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    };
+    if p.parent()
+        .and_then(Path::file_name)
+        .is_some_and(|n| n == "subagents")
+        && let Some(parent) = p.parent().and_then(Path::parent)
+    {
+        return dir(parent);
+    }
     match agent {
         "opencode" => stem,
         // a hermes session is a row in a database, and its path is <db>#<id>
@@ -169,12 +188,20 @@ pub fn session_id(path: &str, agent: &str) -> String {
 }
 
 fn first_record(path: &str) -> Option<Value> {
-    parse(std::io::BufRead::lines(std::io::BufReader::new(std::fs::File::open(path).ok()?)).next()?.ok()?.as_str())
+    parse(
+        std::io::BufRead::lines(std::io::BufReader::new(std::fs::File::open(path).ok()?))
+            .next()?
+            .ok()?
+            .as_str(),
+    )
 }
 
 pub fn resume_command(row: &Row) -> String {
     let Some((_, template)) = RESUME.iter().find(|(a, _)| *a == row.agent) else {
-        return format!("# {} has no resume command; transcript: {}", row.agent, row.path);
+        return format!(
+            "# {} has no resume command; transcript: {}",
+            row.agent, row.path
+        );
     };
     let cmd = template.replace("{sid}", &session_id(&row.path, &row.agent));
     if row.cwd.is_empty() {
@@ -195,11 +222,18 @@ pub fn resume_for_path(hit: &str) -> String {
     let agent = agent_of(&path);
     if agent == "hermes" {
         let Some(row) = hermes::session_of(&path) else {
-            return format!("# hermes has no session {}, or its store could not be read", hermes::id_of(&path));
+            return format!(
+                "# hermes has no session {}, or its store could not be read",
+                hermes::id_of(&path)
+            );
         };
         return resume_command(&row);
     }
-    let mut row = Row { path: path.clone(), agent: agent.clone(), ..Row::default() };
+    let mut row = Row {
+        path: path.clone(),
+        agent: agent.clone(),
+        ..Row::default()
+    };
     name_sessions(&[(agent, vec![PathBuf::from(&path)])], |_, found| {
         if row.cwd.is_empty() {
             row.cwd = found.cwd;
@@ -210,18 +244,27 @@ pub fn resume_for_path(hit: &str) -> String {
 
 /// An opencode hit is one shard; every shard names the session it belongs to.
 pub fn session_of(hit: &str) -> String {
-    let stem = Path::new(hit).file_stem().unwrap_or_default().to_string_lossy().to_string();
+    let stem = Path::new(hit)
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
     if agent_of(hit) != "opencode" || stem.starts_with("ses_") {
         return hit.to_string();
     }
     let id = read_json(Path::new(hit)).map_or(String::new(), |e| find_value(&e, "sessionID"));
-    opencode_sessions().get(&id).cloned().unwrap_or_else(|| hit.to_string())
+    opencode_sessions()
+        .get(&id)
+        .cloned()
+        .unwrap_or_else(|| hit.to_string())
 }
 
 /// (line number, text) of the first message that is not a harness preamble.
 fn first_real(hits: &[scan::Hit]) -> (u64, String) {
     for hit in hits {
-        let Some(entry) = parse(&hit.text) else { continue };
+        let Some(entry) = parse(&hit.text) else {
+            continue;
+        };
         let said = texts(&entry).join(" ");
         if !said.trim().is_empty() && !is_junk(&said) {
             return (hit.line, said);
@@ -244,7 +287,12 @@ where
         scan::search(
             pattern,
             paths,
-            &Scan { literal: false, icase: false, globs: &JSONISH, max_count },
+            &Scan {
+                literal: false,
+                icase: false,
+                globs: &JSONISH,
+                max_count,
+            },
         )
     };
     for (agent, paths) in stores {
@@ -252,21 +300,38 @@ where
         if let Some((_, _, header)) = found.filter(|(_, _, h)| !h.is_empty()) {
             for (path, hits) in names(header, paths, 1) {
                 let header = parse(&hits[0].text);
-                let cwd = header.as_ref().map_or(String::new(), |e| find_value(e, "cwd"));
+                let cwd = header
+                    .as_ref()
+                    .map_or(String::new(), |e| find_value(e, "cwd"));
                 // codex records a run it started for itself like any other session.
                 // pi records nothing, but its own sessions get a uuid, and only a program
                 // passes --session-id, so a named pi session is one a tool started.
                 let sub = hits[0].text.contains(r#""subagent""#)
                     || (agent == "pi"
                         && header.map_or(false, |e| UUID.find(&find_value(&e, "id")).is_none()));
-                add(&path, Found { cwd, sub, ..Found::default() });
+                add(
+                    &path,
+                    Found {
+                        cwd,
+                        sub,
+                        ..Found::default()
+                    },
+                );
             }
         }
         if let Some((_, pattern, _)) = found.filter(|(_, p, _)| !p.is_empty()) {
             for (path, hits) in names(pattern, paths, 4) {
                 let (line, said) = first_real(&hits);
                 let cwd = parse(&hits[0].text).map_or(String::new(), |e| find_value(&e, "cwd"));
-                add(&path, Found { cwd, title: clean(&said, 110), line, ..Found::default() });
+                add(
+                    &path,
+                    Found {
+                        cwd,
+                        title: clean(&said, 110),
+                        line,
+                        ..Found::default()
+                    },
+                );
             }
         }
         if agent == "claude" {
@@ -284,7 +349,14 @@ where
                         title = found;
                     }
                 }
-                add(&path, Found { title: clean(&title, 110), force: true, ..Found::default() });
+                add(
+                    &path,
+                    Found {
+                        title: clean(&title, 110),
+                        force: true,
+                        ..Found::default()
+                    },
+                );
             }
         }
         if agent == "pi" {
@@ -298,7 +370,14 @@ where
                     .map(|e| find_value(&e, "name"))
                     .find(|n| !n.is_empty())
                     .unwrap_or_default();
-                add(&path, Found { title: clean(&name, 110), force: true, ..Found::default() });
+                add(
+                    &path,
+                    Found {
+                        title: clean(&name, 110),
+                        force: true,
+                        ..Found::default()
+                    },
+                );
             }
         }
         if agent == "opencode" {
@@ -321,7 +400,9 @@ where
         if agent == "gemini" {
             // one logs.json of prompts per project, no per-session split
             for path in paths.iter().filter(|p| p.ends_with("logs.json")) {
-                let Some(Value::Array(log)) = read_json(path) else { continue };
+                let Some(Value::Array(log)) = read_json(path) else {
+                    continue;
+                };
                 let first = log
                     .iter()
                     .filter_map(|e| e.get("message").and_then(Value::as_str))
@@ -368,8 +449,13 @@ fn stores_for_names() -> Vec<(String, Vec<PathBuf>)> {
 /// own file, and only a generated session gets a uuid there.
 fn typed_names(rows: &mut [Row]) {
     for row in rows.iter_mut().filter(|r| r.agent == "pi") {
-        let stem = Path::new(&row.path).file_stem().unwrap_or_default().to_string_lossy();
-        let Some((_, id)) = stem.split_once('_') else { continue };
+        let stem = Path::new(&row.path)
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy();
+        let Some((_, id)) = stem.split_once('_') else {
+            continue;
+        };
         if UUID.find(id).is_none() {
             row.title = id.to_string();
         }
@@ -377,7 +463,8 @@ fn typed_names(rows: &mut [Row]) {
     if !rows.iter().any(|r| r.agent == "codex") {
         return;
     }
-    let index = std::fs::read_to_string(home().join(".codex/session_index.jsonl")).unwrap_or_default();
+    let index =
+        std::fs::read_to_string(home().join(".codex/session_index.jsonl")).unwrap_or_default();
     let names: HashMap<String, String> = index
         .lines()
         .filter_map(parse)
@@ -401,7 +488,10 @@ pub fn load_sessions() -> Vec<Row> {
             // ~/.gemini/tmp/<project>/chats/x.jsonl
             let parts: Vec<_> = Path::new(&row.path).components().collect();
             if parts.len() >= 3 {
-                row.cwd = parts[parts.len() - 3].as_os_str().to_string_lossy().to_string();
+                row.cwd = parts[parts.len() - 3]
+                    .as_os_str()
+                    .to_string_lossy()
+                    .to_string();
             }
         }
         row.mtime = mtime(&row.path);
@@ -502,7 +592,11 @@ fn opencode_sessions() -> HashMap<String, String> {
     scan::files_under(&store("opencode").join("session"), "ses_")
         .into_iter()
         .map(|p| {
-            let stem = p.file_stem().unwrap_or_default().to_string_lossy().to_string();
+            let stem = p
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             (stem, p.to_string_lossy().to_string())
         })
         .collect()
@@ -510,13 +604,21 @@ fn opencode_sessions() -> HashMap<String, String> {
 
 /// Search every store. One row per session, at its first hit.
 pub fn search_content(query: &str, regex: bool) -> Vec<Row> {
-    let roots: Vec<PathBuf> =
-        SOURCES.iter().filter(|(a, _)| *a != "hermes").map(|(a, _)| store(a)).collect();
+    let roots: Vec<PathBuf> = SOURCES
+        .iter()
+        .filter(|(a, _)| *a != "hermes")
+        .map(|(a, _)| store(a))
+        .collect();
     let scan = |paths: &[PathBuf], max_count: usize| -> Hits {
         scan::search(
             query,
             paths,
-            &Scan { literal: !regex, icase: true, globs: &scan::CONTENT_GLOBS, max_count },
+            &Scan {
+                literal: !regex,
+                icase: true,
+                globs: &scan::CONTENT_GLOBS,
+                max_count,
+            },
         )
     };
     let mut hits = scan(&roots, 1);
@@ -541,7 +643,12 @@ pub fn search_content(query: &str, regex: bool) -> Vec<Row> {
         let found = scan::search(
             r#""sessionID""#,
             &shards,
-            &Scan { literal: false, icase: false, globs: &[], max_count: 1 },
+            &Scan {
+                literal: false,
+                icase: false,
+                globs: &[],
+                max_count: 1,
+            },
         );
         for (path, hits) in found {
             let session = SES
@@ -555,7 +662,9 @@ pub fn search_content(query: &str, regex: bool) -> Vec<Row> {
     let mut rows = Rows::default();
     for (hit_path, hits) in &hits {
         // every hit in this file may be harness-injected text, not conversation
-        let Some(real) = hits.iter().find(|h| !injected(&h.text, query)) else { continue };
+        let Some(real) = hits.iter().find(|h| !injected(&h.text, query)) else {
+            continue;
+        };
         let path = owner.get(hit_path).unwrap_or(hit_path).clone();
         if rows.by_path.contains_key(&path) {
             continue;
@@ -567,7 +676,11 @@ pub fn search_content(query: &str, regex: bool) -> Vec<Row> {
         row.mtime = mtime(hit_path);
     }
     let mut rows = rows.into_vec();
-    let wanted = if regex { query.to_string() } else { regex::escape(query) };
+    let wanted = if regex {
+        query.to_string()
+    } else {
+        regex::escape(query)
+    };
     if let Ok(pattern) = regex::Regex::new(&format!("(?i){wanted}")) {
         rows.extend(hermes::search_content(&pattern, query));
     }
@@ -620,7 +733,9 @@ pub fn hydrate(rows: &mut [Row], query: &str) {
         }
     });
     for row in rows.iter_mut() {
-        let Some((cwd, title)) = named.get(&row.path) else { continue };
+        let Some((cwd, title)) = named.get(&row.path) else {
+            continue;
+        };
         if row.cwd.is_empty() {
             row.cwd = cwd.clone();
         }
@@ -670,9 +785,26 @@ fn opencode_transcript(session_json: &str, show: Show) -> Vec<String> {
 ///
 /// `at` prints only the record on that line, which is what the picker previews. Otherwise
 /// only the conversation: tool calls, their results and the harness preambles are dropped.
-pub fn read(path: &str, head: usize, tail: usize, at: u64, show: Show) -> String {
-    let blocks = blocks(path, at, show);
+pub fn read(
+    path: &str,
+    head: usize,
+    tail: usize,
+    at: u64,
+    show: Show,
+    role: Option<&str>,
+) -> String {
+    let blocks: Vec<String> = blocks(path, at, show)
+        .into_iter()
+        .filter(|block| role.is_none_or(|role| block_role(block) == role))
+        .collect();
     ends(&blocks, head, tail).join("\n\n")
+}
+
+fn block_role(block: &str) -> &str {
+    block
+        .strip_prefix("## ")
+        .and_then(|block| block.split_once('\n'))
+        .map_or("", |(role, _)| role)
 }
 
 /// Mark the runs an agent started for itself. Name mode learns this while it reads the
@@ -720,22 +852,45 @@ pub fn preview(path: &str, at: u64) -> String {
 
     let raw = raw_text(path);
     let files = files_named(&raw);
-    let model =
-        if agent == "hermes" { hermes::model_of(path) } else { model_used(&raw) };
+    let model = if agent == "hermes" {
+        hermes::model_of(path)
+    } else {
+        model_used(&raw)
+    };
     let label = |name: &str, value: String| format!("\x1b[2m{name:7}\x1b[0m{value}");
     let mut out = vec![
-        label("client", if model.is_empty() { agent.clone() } else { format!("{agent}  {model}") }),
+        label(
+            "client",
+            if model.is_empty() {
+                agent.clone()
+            } else {
+                format!("{agent}  {model}")
+            },
+        ),
         label("date", day(at_time, "%Y-%m-%d %H:%M")),
         label("name", clean(&title, 200)),
-        label("dir", if cwd.is_empty() { path.to_string() } else { cwd.clone() }),
+        label(
+            "dir",
+            if cwd.is_empty() {
+                path.to_string()
+            } else {
+                cwd.clone()
+            },
+        ),
     ];
     if !files.is_empty() {
         out.push(label("files", cut(&files.join(" "), 220)));
     }
-    out.push(label("file", path.replace(&home().to_string_lossy().to_string(), "~")));
+    out.push(label(
+        "file",
+        path.replace(&home().to_string_lossy().to_string(), "~"),
+    ));
     let said = blocks(path, 0, Show::default());
-    let matched =
-        if at == 0 { String::new() } else { read(path, 0, 0, at, Show::default()) };
+    let matched = if at == 0 {
+        String::new()
+    } else {
+        read(path, 0, 0, at, Show::default(), None)
+    };
     // in name mode the match IS the first message, and printing it twice wastes the pane
     if !matched.is_empty() && said.first() != Some(&matched) {
         out.push(format!("--- match, line {at} ---"));
@@ -748,7 +903,11 @@ pub fn preview(path: &str, at: u64) -> String {
 
 /// The whole session as text, whatever it is split over.
 fn raw_text(path: &str) -> String {
-    match Path::new(path).file_stem().unwrap_or_default().to_string_lossy() {
+    match Path::new(path)
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+    {
         // opencode keeps the tool calls and the model in its part shards, not the session file
         stem if stem.starts_with("ses_") => opencode_messages(path)
             .into_iter()
@@ -763,7 +922,10 @@ fn raw_text(path: &str) -> String {
 /// The model the session last ran on. Every agent writes it on each turn, under its own
 /// spelling, so the last one is the one you were on when you stopped.
 fn model_used(raw: &str) -> String {
-    MODEL_KEY.captures_iter(raw).last().map_or(String::new(), |found| found[1].to_string())
+    MODEL_KEY
+        .captures_iter(raw)
+        .last()
+        .map_or(String::new(), |found| found[1].to_string())
 }
 
 /// Files the session named in a tool call, read from the raw records: each agent has its own key.
@@ -785,7 +947,11 @@ fn blocks(path: &str, at: u64, show: Show) -> Vec<String> {
     if agent_of(path) == "hermes" {
         return hermes::blocks(path, show);
     }
-    let stem = Path::new(path).file_stem().unwrap_or_default().to_string_lossy().to_string();
+    let stem = Path::new(path)
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
     if stem.starts_with("ses_") {
         // opencode: a session is a directory of shards
         return opencode_transcript(path, show);
@@ -797,7 +963,9 @@ fn blocks(path: &str, at: u64, show: Show) -> Vec<String> {
         if at != 0 && line_no != at {
             continue;
         }
-        let Some(block) = block(line, at != 0, show) else { continue };
+        let Some(block) = block(line, at != 0, show) else {
+            continue;
+        };
         // a resent prompt is filed twice, once cut short, so keep whichever says more
         match blocks.last() {
             Some(last) if block.starts_with(last.as_str()) => drop(blocks.pop()),
@@ -807,13 +975,17 @@ fn blocks(path: &str, at: u64, show: Show) -> Vec<String> {
         blocks.push(block);
     }
     if blocks.is_empty() {
-        // not jsonl: gemini's logs.json is one array for the whole project
-        if let Some(entry) = parse(&String::from_utf8_lossy(&raw)) {
-            let said: Vec<String> = texts(&entry)
-                .into_iter()
-                .filter(|t| !t.trim().is_empty())
-                .collect();
-            blocks.push(said.join("\n"));
+        // gemini keeps every prompt in one JSON array rather than one JSONL record per turn
+        if let Some(Value::Array(entries)) = parse(&String::from_utf8_lossy(&raw)) {
+            for entry in entries {
+                let said: Vec<String> = texts(&entry)
+                    .into_iter()
+                    .filter(|t| !t.trim().is_empty())
+                    .collect();
+                if !said.is_empty() {
+                    blocks.push(format!("## {}\n{}", role_of(&entry), said.join("\n")));
+                }
+            }
         }
     }
     blocks
@@ -837,13 +1009,16 @@ fn block(line: &str, verbatim: bool, show: Show) -> Option<String> {
     let mut body = said.join("\n");
     if verbatim && body.is_empty() {
         // the match landed in a tool call; show the record itself
-        body = cut(&serde_json::to_string_pretty(&entry).unwrap_or_default(), 4000);
+        body = cut(
+            &serde_json::to_string_pretty(&entry).unwrap_or_default(),
+            4000,
+        );
     }
     // claude files a tool result under the user's role, and codex and pi give the tool
     // records a role of their own, so anything that is only tool lines is labelled tool
     let spoke = role_of(&entry);
-    let turn = ["user", "assistant"].contains(&spoke.as_str())
-        && entry.get("toolUseResult").is_none();
+    let turn =
+        ["user", "assistant"].contains(&spoke.as_str()) && entry.get("toolUseResult").is_none();
     let role = if turn { spoke } else { "tool".to_string() };
     if body.is_empty() || !(verbatim || turn || !calls.is_empty()) {
         return None;

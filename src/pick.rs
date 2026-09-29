@@ -11,8 +11,13 @@ use std::process::{Command, Stdio};
 pub const ROWS: usize = 20000;
 
 /// The row, padded to fixed widths so the header lines up with it.
-pub const COLUMNS: [(&str, usize); 5] =
-    [("when", 16), ("agent", 8), ("project", 16), ("name", 36), ("opening", 44)];
+pub const COLUMNS: [(&str, usize); 5] = [
+    ("when", 16),
+    ("agent", 8),
+    ("project", 16),
+    ("name", 36),
+    ("opening", 44),
+];
 
 pub fn header_row() -> String {
     COLUMNS
@@ -29,7 +34,11 @@ pub fn pick(source: Box<dyn BufRead + Send>, filters: &str, query: &str) {
         .stderr(Stdio::null())
         .status()
         .is_ok();
-    let preview_style = if bat { "Markdown" } else { "plain (bat missing)" };
+    let preview_style = if bat {
+        "Markdown"
+    } else {
+        "plain (bat missing)"
+    };
     let me = std::env::current_exe()
         .expect("cannot find my own path")
         .to_string_lossy()
@@ -40,10 +49,16 @@ pub fn pick(source: Box<dyn BufRead + Send>, filters: &str, query: &str) {
     let mut agents = Vec::new();
     let mut legend = Vec::new();
     for (n, (agent, _)) in SOURCES.iter().enumerate() {
-        agents.push(format!("f{}:reload({me} --rows{filters} -a {agent} -n {ROWS})", n + 1));
+        agents.push(format!(
+            "f{}:reload({me} --rows{filters} -a {agent} -n {ROWS})",
+            n + 1
+        ));
         legend.push(format!("f{} {agent}", n + 1));
     }
-    agents.push(format!("f{}:reload({me} --rows{filters} -n {ROWS})", SOURCES.len() + 1));
+    agents.push(format!(
+        "f{}:reload({me} --rows{filters} -n {ROWS})",
+        SOURCES.len() + 1
+    ));
     legend.push(format!("f{} all", SOURCES.len() + 1));
 
     let reader = SkimItemReader::new(
@@ -101,11 +116,15 @@ pub fn pick(source: Box<dyn BufRead + Send>, filters: &str, query: &str) {
         ..Default::default()
     };
 
-    let Some(out) = Skim::run_with(&options, Some(items)) else { return };
+    let Some(out) = Skim::run_with(&options, Some(items)) else {
+        return;
+    };
     if out.is_abort {
         return;
     }
-    let Some(chosen) = out.selected_items.first() else { return };
+    let Some(chosen) = out.selected_items.first() else {
+        return;
+    };
     let fields: Vec<String> = chosen.output().split('\t').map(str::to_string).collect();
     if fields.len() < 3 {
         return;
@@ -116,7 +135,10 @@ pub fn pick(source: Box<dyn BufRead + Send>, filters: &str, query: &str) {
     }
     // the whole conversation as markdown, so `asf -i > session.md` works from the picker
     if out.final_key == Key::Alt('m') {
-        println!("{}", read(&session_of(&fields[1]), 0, 0, 0, Show::default()));
+        println!(
+            "{}",
+            read(&session_of(&fields[1]), 0, 0, 0, Show::default(), None)
+        );
         return;
     }
     // read the session fresh: after a transcript search these rows are ones the caller never scanned

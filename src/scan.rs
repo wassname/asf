@@ -64,7 +64,10 @@ impl Sink for Collect {
         if let Ok(text) = std::str::from_utf8(m.bytes()) {
             self.hits.push(Hit {
                 line: m.line_number().unwrap_or(0),
-                text: text.trim_end_matches('\n').trim_end_matches('\r').to_string(),
+                text: text
+                    .trim_end_matches('\n')
+                    .trim_end_matches('\r')
+                    .to_string(),
             });
         }
         Ok(self.seen < self.max)
@@ -133,8 +136,14 @@ pub fn search(pattern: &str, paths: &[PathBuf], scan: &Scan) -> Hits {
             if !entry.file_type().is_some_and(|t| t.is_file()) {
                 return ignore::WalkState::Continue;
             }
-            let mut sink = Collect { max: scan.max_count, seen: 0, hits: Vec::new() };
-            if searcher.search_path(&matcher, entry.path(), &mut sink).is_ok()
+            let mut sink = Collect {
+                max: scan.max_count,
+                seen: 0,
+                hits: Vec::new(),
+            };
+            if searcher
+                .search_path(&matcher, entry.path(), &mut sink)
+                .is_ok()
                 && !sink.hits.is_empty()
             {
                 hits.lock()
