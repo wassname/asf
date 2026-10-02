@@ -338,14 +338,36 @@ fn main() {
         std::process::exit(2);
     }
 
-    // what is left is not a file, so it is a session id or a name: search for it. The resume
-    // command hands you an id, and that is what you have in front of you when you want to read
-    // the session back.
+    // Resolve IDs before name search reads the transcript stores. -- PI/OpenAI
     let mut query = args.query.join(" ");
     if let Some(id) = given {
         if !query.is_empty() {
             eprintln!("asf: give a query or a session, not both: {query:?} and {id:?}");
             std::process::exit(2);
+        }
+        if let Some(agent) = &args.agent {
+            if !SOURCES.iter().any(|(a, _)| a == agent) {
+                eprintln!("asf: no such agent {agent:?}");
+                std::process::exit(2);
+            }
+        }
+        if !args.content && !args.regex {
+            let paths = sessions::resolve_id(id, args.agent.as_deref(), args.sub);
+            match paths.as_slice() {
+                [path] => {
+                    eprintln!("asf: session {path}");
+                    one(&args, path);
+                }
+                [] if sessions::looks_like_id(id) => {
+                    eprintln!("asf: no such session id: {id}");
+                    std::process::exit(1);
+                }
+                [] => {}
+                _ => {
+                    eprintln!("asf: ambiguous session id {id:?}:\n{}", paths.join("\n"));
+                    std::process::exit(2);
+                }
+            }
         }
         query = id.to_string();
     }

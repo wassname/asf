@@ -156,10 +156,31 @@ pub fn search(pattern: &str, paths: &[PathBuf], scan: &Scan) -> Hits {
     found.into_inner().unwrap()
 }
 
-/// Every `ses_*.json` under a directory, or the file itself.
-pub fn json_files(root: &Path) -> Vec<PathBuf> {
+/// Bounded lookup lists session files without opening deeper artifact directories. -- PI/OpenAI
+pub fn json_files(root: &Path, depth: Option<usize>) -> Vec<PathBuf> {
     if !root.exists() {
         return Vec::new();
+    }
+    if let Some(depth) = depth {
+        let mut directories = vec![(root.to_path_buf(), 0)];
+        let mut files = Vec::new();
+        while let Some((directory, level)) = directories.pop() {
+            for entry in std::fs::read_dir(directory).expect("cannot read session directory") {
+                let entry = entry.expect("cannot read session directory entry");
+                let kind = entry.file_type().expect("cannot read session file type");
+                if kind.is_dir() && level + 1 < depth {
+                    directories.push((entry.path(), level + 1));
+                } else if kind.is_file()
+                    && entry
+                        .path()
+                        .extension()
+                        .is_some_and(|ext| ext == "json" || ext == "jsonl")
+                {
+                    files.push(entry.path());
+                }
+            }
+        }
+        return files;
     }
     WalkBuilder::new(root)
         .overrides(globs(&JSONISH))

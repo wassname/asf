@@ -26,6 +26,11 @@ user|assistant|tool` filters a read before `--head` and `--tail`. `--role tool` 
 `--tools` and selects tool records; `--tools` also retains tool details inside user and assistant
 records.
 
+`-r`, `-p`, and `-u` resolve session IDs from filenames before searching transcript names.
+Pi IDs are verified against their headers; when filenames differ, lookup reads only headers.
+An exact ID beats a prefix match. Ambiguous prefixes fail and list the paths; missing IDs fail
+without a name scan. Other words still use name search. <!-- PI/OpenAI -->
+
 When a query resolves `-r`, `-p`, or `-u`, asf prints its choice and up to two next matches on
 stderr. The transcript, preview, or resume command stays on stdout. No matching sessions fail
 explicitly. Stores for agents you do not have are ignored.

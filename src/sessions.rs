@@ -187,6 +187,105 @@ pub fn session_id(path: &str, agent: &str) -> String {
     }
 }
 
+/// Resolve filenames without reading transcripts; Pi IDs come from headers. -- PI/OpenAI
+pub fn resolve_id(query: &str, agent: Option<&str>, sub: bool) -> Vec<String> {
+    let mut matches: Vec<(String, String)> = Vec::new();
+    let mut pi_paths = Vec::new();
+    for (source, _) in SOURCES {
+        if source == "hermes" || agent.is_some_and(|a| a != source) {
+            continue;
+        }
+        let root = if source == "opencode" {
+            store(source).join("session")
+        } else {
+            store(source)
+        };
+        let depth = match source {
+            "codex" => 4,
+            "gemini" => 3,
+            _ => 2,
+        };
+        for path in scan::json_files(&root, Some(depth)) {
+            let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+            if (source == "copilot" && stem != "events")
+                || (source == "opencode" && !stem.starts_with("ses_"))
+                || (["pi", "claude"].contains(&source)
+                    && path.extension().is_none_or(|ext| ext != "jsonl"))
+                || path.to_string_lossy().contains("/subagents/")
+            {
+                continue;
+            }
+            let path = path.to_string_lossy().into_owned();
+            let id = if source == "pi" {
+                pi_paths.push(path.clone());
+                stem.split_once('_')
+                    .map_or(stem.as_ref(), |(_, id)| id)
+                    .to_string()
+            } else {
+                session_id(&path, source)
+            };
+            if !id.starts_with(query) {
+                continue;
+            }
+            let header = if source == "pi" || source == "codex" {
+                first_record(&path)
+            } else {
+                None
+            };
+            let id = if source == "pi" {
+                header.as_ref().map_or(id, |h| find_value(h, "id"))
+            } else {
+                id
+            };
+            let child = match source {
+                "pi" => UUID.find(&id).is_none(),
+                "codex" => header
+                    .as_ref()
+                    .is_some_and(|h| h.to_string().contains("\"subagent\"")),
+                _ => false,
+            };
+            if id.starts_with(query) && (sub || !child) {
+                matches.push((id, path));
+            }
+        }
+    }
+    if !matches.iter().any(|(id, _)| id == query) && (looks_like_id(query) || sub) {
+        for path in pi_paths {
+            let id = session_id(&path, "pi");
+            if id.starts_with(query) && (sub || UUID.find(&id).is_some()) {
+                matches.push((id, path));
+            }
+        }
+    }
+    if agent.is_none_or(|a| a == "hermes") {
+        matches.extend(
+            hermes::sessions()
+                .into_iter()
+                .filter(|row| (sub || !row.sub) && hermes::id_of(&row.path).starts_with(query))
+                .map(|row| (hermes::id_of(&row.path), row.path)),
+        );
+    }
+    let exact = matches.iter().any(|(id, _)| id == query);
+    let mut paths: Vec<String> = matches
+        .into_iter()
+        .filter(|(id, _)| !exact || id == query)
+        .map(|(_, path)| path)
+        .collect();
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+pub fn looks_like_id(query: &str) -> bool {
+    (query.len() >= 8
+        && query.bytes().all(|c| c.is_ascii_hexdigit() || c == b'-')
+        && query.bytes().take(8).all(|c| c.is_ascii_hexdigit()))
+        || query.starts_with("ses_")
+        || (query.len() >= 16
+            && query.bytes().take(8).all(|c| c.is_ascii_digit())
+            && query.as_bytes()[8] == b'_')
+}
+
 fn first_record(path: &str) -> Option<Value> {
     parse(
         std::io::BufRead::lines(std::io::BufReader::new(std::fs::File::open(path).ok()?))
@@ -521,7 +620,7 @@ pub fn stream_names(
         .filter(|(source, _)| agent.is_none_or(|a| a == source))
         .flat_map(|(source, roots)| {
             roots.into_iter().take(if source == "gemini" { 1 } else { usize::MAX }).flat_map(move |root| {
-                scan::json_files(&root).into_iter().map({
+                scan::json_files(&root, None).into_iter().map({
                     let source = source.clone();
                     move |path| {
                         let changed = mtime(&path.to_string_lossy());
