@@ -1,15 +1,16 @@
 //! Where the sessions live, how each agent names one, and how to read one back.
 
 use crate::hermes;
+use crate::name_cache::NameCache;
 use crate::record::*;
 use crate::scan::{self, Hits, JSONISH, Scan};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Every session store on this machine. Add an agent by adding a line. Content search works
-/// on any of them; names need one line in NAME_PATTERNS or in load_sessions.
+/// Session stores; name metadata is read by name_sessions. -- PI/OpenAI
 /// hermes is last and is a sqlite file, not a directory: src/hermes.rs reads it instead.
 pub const SOURCES: [(&str, &str); 7] = [
     ("claude", ".claude/projects"),
@@ -230,10 +231,12 @@ pub fn resolve_id(query: &str, agent: Option<&str>, sub: bool) -> Vec<String> {
             let id = session_id(&path, source);
             let child = match source {
                 "pi" => UUID.find(&id).is_none(),
-                "codex" => first_record(&path)
-                    .is_some_and(|h| h.to_string().contains("\"subagent\"")),
-                "opencode" => read_json(Path::new(&path))
-                    .is_some_and(|h| h.get("parentID").is_some()),
+                "codex" => {
+                    first_record(&path).is_some_and(|h| h.to_string().contains("\"subagent\""))
+                }
+                "opencode" => {
+                    read_json(Path::new(&path)).is_some_and(|h| h.get("parentID").is_some())
+                }
                 _ => false,
             };
             if id.starts_with(query) && (sub || !child) {
@@ -370,8 +373,67 @@ fn read_json(path: &Path) -> Option<Value> {
     parse(&std::fs::read_to_string(path).ok()?)
 }
 
-/// Fill in name and working directory. Two searches per agent, over whole stores or over a
-/// handful of files, which is why content mode can afford to call it too.
+// A complete tail rename is current; missing or lower-priority names need the full scan. -- PI/OpenAI
+fn tail_title(path: &Path, agent: &str) -> Option<String> {
+    let mut file = std::fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    let start = len.saturating_sub(64 * 1024);
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    let raw = String::from_utf8_lossy(&bytes);
+    let mut lines = raw.lines();
+    if start != 0 {
+        lines.next();
+    }
+    for line in lines.collect::<Vec<_>>().into_iter().rev() {
+        let key = if agent == "pi" {
+            "session_info"
+        } else {
+            "agent-name"
+        };
+        if !line.contains(key) {
+            continue;
+        }
+        let Some(entry) = parse(line) else { continue };
+        if entry.get("type").and_then(Value::as_str) != Some(key) {
+            continue;
+        }
+        let field = if agent == "pi" { "name" } else { "agentName" };
+        let name = find_value(&entry, field);
+        if agent == "claude" {
+            return (!name.is_empty()).then(|| clean(&name, 110));
+        }
+        if !name.is_empty() {
+            return Some(clean(&name, 110));
+        }
+    }
+    None
+}
+
+// Stop at the first real prompt rather than reading on to find four user records. -- PI/OpenAI
+fn opening_hits(path: &Path, pattern: &regex::Regex) -> Vec<scan::Hit> {
+    let Ok(file) = std::fs::File::open(path) else {
+        return Vec::new();
+    };
+    let mut hits = Vec::new();
+    for (index, line) in BufReader::new(file).lines().enumerate() {
+        let Ok(text) = line else { continue };
+        if !pattern.is_match(&text) {
+            continue;
+        }
+        hits.push(scan::Hit {
+            line: index as u64 + 1,
+            text,
+        });
+        if hits.len() == 4 || !first_real(&hits).1.is_empty() {
+            break;
+        }
+    }
+    hits
+}
+
+/// Fill in name and working directory from the session's own metadata. -- PI/OpenAI
 fn name_sessions<F>(stores: &[(String, Vec<PathBuf>)], mut add: F)
 where
     F: FnMut(&str, Found),
@@ -413,7 +475,13 @@ where
             }
         }
         if let Some((_, pattern, _)) = found.filter(|(_, p, _)| !p.is_empty()) {
-            for (path, hits) in names(pattern, paths, 4) {
+            let pattern = regex::Regex::new(pattern).expect("bad metadata pattern");
+            for path in paths {
+                let hits = opening_hits(path, &pattern);
+                if hits.is_empty() {
+                    continue;
+                }
+                let path = path.to_string_lossy();
                 let (line, said) = first_real(&hits);
                 let cwd = parse(&hits[0].text).map_or(String::new(), |e| find_value(&e, "cwd"));
                 add(
@@ -427,10 +495,29 @@ where
                 );
             }
         }
+        let mut title_paths = Vec::new();
+        if agent == "pi" || agent == "claude" {
+            for path in paths {
+                if path.is_file()
+                    && let Some(title) = tail_title(path, agent)
+                {
+                    add(
+                        &path.to_string_lossy(),
+                        Found {
+                            title,
+                            force: true,
+                            ..Found::default()
+                        },
+                    );
+                } else {
+                    title_paths.push(path.clone());
+                }
+            }
+        }
         if agent == "claude" {
             // a name beats the first message. Each record is rewritten as the session goes
             // on and the old ones stay in the file, so the last of its kind is the live one.
-            for (path, hits) in names(TITLES, paths, usize::MAX) {
+            for (path, hits) in names(TITLES, &title_paths, usize::MAX) {
                 let mut title = String::new();
                 for field in TITLE_FIELDS {
                     let key = format!("\"{field}\"");
@@ -455,7 +542,7 @@ where
         if agent == "pi" {
             // pi files its own name for a session as a record of its own, rewritten as the
             // session is renamed, so the last one is the live name
-            for (path, hits) in names(r#""type":"session_info""#, paths, usize::MAX) {
+            for (path, hits) in names(r#""type":"session_info""#, &title_paths, usize::MAX) {
                 let name = hits
                     .iter()
                     .rev()
@@ -515,28 +602,6 @@ where
     }
 }
 
-fn stores_for_names() -> Vec<(String, Vec<PathBuf>)> {
-    let mut stores: Vec<(String, Vec<PathBuf>)> = NAME_PATTERNS
-        .iter()
-        .map(|(agent, _, _)| (agent.to_string(), vec![store(agent)]))
-        .collect();
-    let gemini = stores.iter_mut().find(|(a, _)| a == "gemini").unwrap();
-    let tmp = store("gemini");
-    if let Ok(entries) = std::fs::read_dir(&tmp) {
-        for entry in entries.filter_map(Result::ok) {
-            let log = entry.path().join("logs.json");
-            if log.exists() {
-                gemini.1.push(log);
-            }
-        }
-    }
-    stores.push((
-        "opencode".to_string(),
-        scan::files_under(&store("opencode").join("session"), "ses_"),
-    ));
-    stores
-}
-
 /// The name you typed, where the transcript itself does not hold it. codex keeps a thread
 /// name in its own index; a pi session you started with `--session-id <name>` is named by its
 /// own file, and only a generated session gets a uuid there.
@@ -556,43 +621,21 @@ fn typed_names(rows: &mut [Row]) {
     if !rows.iter().any(|r| r.agent == "codex") {
         return;
     }
-    let index =
-        std::fs::read_to_string(home().join(".codex/session_index.jsonl")).unwrap_or_default();
-    let names: HashMap<String, String> = index
-        .lines()
-        .filter_map(parse)
-        .map(|e| (find_value(&e, "id"), find_value(&e, "thread_name")))
-        .filter(|(id, name)| !id.is_empty() && !name.is_empty())
-        .collect();
+    static NAMES: std::sync::LazyLock<HashMap<String, String>> = std::sync::LazyLock::new(|| {
+        std::fs::read_to_string(home().join(".codex/session_index.jsonl"))
+            .unwrap_or_default()
+            .lines()
+            .filter_map(parse)
+            .map(|e| (find_value(&e, "id"), find_value(&e, "thread_name")))
+            .filter(|(id, name)| !id.is_empty() && !name.is_empty())
+            .collect()
+    });
+    let names = &*NAMES;
     for row in rows.iter_mut().filter(|r| r.agent == "codex") {
         if let Some(name) = names.get(&session_id(&row.path, "codex")) {
             row.title = clean(name, 110);
         }
     }
-}
-
-/// One row per session: agent, path, mtime, cwd, title.
-pub fn load_sessions() -> Vec<Row> {
-    let mut rows = Rows::default();
-    name_sessions(&stores_for_names(), |path, found| rows.add_name(path, found));
-    let mut rows = rows.into_vec();
-    for row in &mut rows {
-        if row.agent == "gemini" && row.cwd.is_empty() {
-            // ~/.gemini/tmp/<project>/chats/x.jsonl
-            let parts: Vec<_> = Path::new(&row.path).components().collect();
-            if parts.len() >= 3 {
-                row.cwd = parts[parts.len() - 3]
-                    .as_os_str()
-                    .to_string_lossy()
-                    .to_string();
-            }
-        }
-        row.mtime = mtime(&row.path);
-    }
-    typed_names(&mut rows);
-    // hermes has its own reader: its sessions are rows in a database, not files
-    rows.extend(hermes::sessions());
-    rows
 }
 
 pub fn stream_names(
@@ -603,29 +646,57 @@ pub fn stream_names(
     stop: &AtomicBool,
     mut send: impl FnMut(Row) -> bool,
 ) {
-    let wanted = if regex { query.to_string() } else { regex::escape(query) };
+    let wanted = if regex {
+        query.to_string()
+    } else {
+        regex::escape(query)
+    };
     let pattern = regex::Regex::new(&format!("(?i){wanted}")).expect("bad query");
     enum Candidate {
         File(String, PathBuf),
         Hermes(Row),
     }
-    let mut files: Vec<(f64, Candidate)> = stores_for_names()
-        .into_iter()
-        .filter(|(source, _)| agent.is_none_or(|a| a == source))
-        .flat_map(|(source, roots)| {
-            roots.into_iter().take(if source == "gemini" { 1 } else { usize::MAX }).flat_map(move |root| {
-                scan::json_files(&root).into_iter().map({
-                    let source = source.clone();
-                    move |path| {
-                        let changed = mtime(&path.to_string_lossy());
-                        (changed, Candidate::File(source.clone(), path))
+    let mut cache = NameCache::load();
+    let mut files: Vec<(f64, Candidate)> = SOURCES
+        .iter()
+        .filter(|(source, _)| *source != "hermes" && agent.is_none_or(|a| a == *source))
+        .flat_map(|(source, _)| {
+            let root = if *source == "opencode" {
+                store(source).join("session")
+            } else {
+                store(source)
+            };
+            let depth = match *source {
+                "codex" => 4,
+                "gemini" => 3,
+                "claude" if sub => 4,
+                _ => 2,
+            };
+            scan::session_files(&root, depth)
+                .into_iter()
+                .filter(move |path| {
+                    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+                    match *source {
+                        "pi" | "claude" => path.extension().is_some_and(|ext| ext == "jsonl"),
+                        "copilot" => stem == "events",
+                        "opencode" => stem.starts_with("ses_"),
+                        _ => true,
                     }
                 })
-            })
+                .map(move |path| {
+                    (
+                        mtime(&path.to_string_lossy()),
+                        Candidate::File(source.to_string(), path),
+                    )
+                })
         })
         .collect();
     if agent.is_none_or(|a| a == "hermes") {
-        files.extend(hermes::sessions().into_iter().map(|row| (row.mtime, Candidate::Hermes(row))));
+        files.extend(
+            hermes::sessions()
+                .into_iter()
+                .map(|row| (row.mtime, Candidate::Hermes(row))),
+        );
     }
     files.sort_by(|a, b| b.0.total_cmp(&a.0));
     for (changed, candidate) in files {
@@ -634,9 +705,20 @@ pub fn stream_names(
         }
         let mut rows = match candidate {
             Candidate::File(source, path) => {
-                let mut rows = Rows::default();
-                name_sessions(&[(source, vec![path])], |path, found| rows.add_name(path, found));
-                rows.into_vec()
+                if let Some(rows) = cache.get(&path, &source) {
+                    rows
+                } else {
+                    let before = NameCache::stamp(&path);
+                    let mut rows = Rows::default();
+                    name_sessions(&[(source, vec![path.clone()])], |path, found| {
+                        rows.add_name(path, found)
+                    });
+                    let rows = rows.into_vec();
+                    if let Some(before) = before {
+                        cache.put(&path, &rows, &before);
+                    }
+                    rows
+                }
             }
             Candidate::Hermes(row) => vec![row],
         };
@@ -646,7 +728,10 @@ pub fn stream_names(
             if row.agent == "gemini" && row.cwd.is_empty() {
                 let parts: Vec<_> = Path::new(&row.path).components().collect();
                 if parts.len() >= 3 {
-                    row.cwd = parts[parts.len() - 3].as_os_str().to_string_lossy().to_string();
+                    row.cwd = parts[parts.len() - 3]
+                        .as_os_str()
+                        .to_string_lossy()
+                        .to_string();
                 }
             }
             if (sub || !row.sub)

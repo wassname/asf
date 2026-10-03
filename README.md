@@ -1,7 +1,7 @@
 # asf - agent session finder
 
 Find a coding-agent session by name or transcript text. Supports Claude Code, Codex,
-Pi, OpenCode, Gemini, Copilot, and Hermes. Searches the stores directly; no index.
+Pi, OpenCode, Gemini, Copilot, and Hermes. Searches transcript text directly; caches session metadata.
 
 ## Install
 
@@ -36,7 +36,17 @@ asf -r "$PI_INTERCOM_SESSION_ID" --role user --tail 10
 
 `--role user|assistant|tool` filters before `--head` and `--tail`. `--tools` keeps tool
 calls/results; `--think` keeps reasoning. `--role tool` enables `--tools`.
-`-a AGENT` limits the agent; `--sub` includes subagent sessions. See `asf --help` for all flags.
+`-a AGENT` limits the agent before scanning; `--sub` includes subagent sessions. See `asf --help` for all flags.
+
+Name search reads sessions newest-first and stops at `-n` matches or an exact name
+match (literal queries only). Read/preview/resume by name stops at the first match. These searches do not count older matches. IDs use
+filenames first, then Pi headers when needed. Transcript search (`-c`) remains exhaustive.
+
+Metadata is cached in `${XDG_CACHE_HOME:-~/.cache}/asf/names-v1.json`, checked against
+file size and nanosecond modification time. Changed and uncached transcripts are read
+again. Pi/Claude rename lookup tries the last 64 KB before a full metadata scan; names
+in the middle still work. The first broad name search can be slower while the cache fills.
+Delete the cache to rebuild it. <!-- PI/OpenAI -->
 
 ## Picker
 

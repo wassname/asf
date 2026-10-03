@@ -9,6 +9,7 @@
 //!
 
 mod hermes;
+mod name_cache;
 mod pick;
 mod record;
 mod scan;
@@ -56,8 +57,12 @@ Examples:
 -n is --limit (rows to print), not a name: the name is the plain query word.
 
 Name search, the default, matches the session's own name, its project, and the first thing
-you said. Content search, -c, reads every message, what the assistant said and what tools
-printed included. Both take a literal phrase and ignore case; --re opts into a pattern.
+you said. It uses cached metadata, reads newest-first, and stops at --limit matches
+or an exact name match (literal queries only).
+Read/preview/resume by name stops at the newest match; older matches are not counted.
+Uncached or changed metadata can require a full file scan. Content search, -c, reads every
+message, what the assistant said and what tools printed included, and scans all stores.
+Both take a literal phrase and ignore case; --re opts into a pattern.
 
 A name is whichever the agent kept: the one you typed (claude /rename, a codex thread name,
 a pi --session-id), then the one its UI shows, then your opening message. Where a session was
@@ -99,7 +104,7 @@ struct Args {
     /// include claude subagent logs, which cannot be resumed
     #[arg(long)]
     sub: bool,
-    /// rows to print
+    /// maximum matches; name search stops here, content search limits output only
     #[arg(short = 'n', long, default_value_t = 20)]
     limit: usize,
     /// print transcript paths only
@@ -339,7 +344,9 @@ fn main() {
         one(&args, path);
     }
     // a missing path would fall through to the search below and scan every transcript for it
-    if let Some(p) = given.filter(|p| p.contains('/') || p.ends_with(".jsonl") || p.ends_with(".json")) {
+    if let Some(p) =
+        given.filter(|p| p.contains('/') || p.ends_with(".jsonl") || p.ends_with(".json"))
+    {
         eprintln!("asf: no such session file: {p}");
         std::process::exit(2);
     }
@@ -372,12 +379,21 @@ fn main() {
         query = id.to_string();
     }
     if (args.pick || args.stream_rows) && !args.content {
-        if args.regex && let Err(err) = regex::Regex::new(&format!("(?i){query}")) {
+        if args.regex
+            && let Err(err) = regex::Regex::new(&format!("(?i){query}"))
+        {
             eprintln!("asf: bad pattern {query:?}: {err}");
             std::process::exit(1);
         }
         if args.stream_rows {
-            stream_rows(&query, args.regex, args.agent.as_deref(), args.sub, &AtomicBool::new(false), std::io::stdout().lock());
+            stream_rows(
+                &query,
+                args.regex,
+                args.agent.as_deref(),
+                args.sub,
+                &AtomicBool::new(false),
+                std::io::stdout().lock(),
+            );
             return;
         }
         let (reader, writer) = UnixStream::pair().expect("cannot open picker stream");
@@ -388,7 +404,14 @@ fn main() {
         let sub = args.sub;
         let regex = args.regex;
         std::thread::spawn(move || {
-            stream_rows(&worker_query, regex, worker_agent.as_deref(), sub, &worker_stop, writer);
+            stream_rows(
+                &worker_query,
+                regex,
+                worker_agent.as_deref(),
+                sub,
+                &worker_stop,
+                writer,
+            );
         });
         let filters = match (&args.agent, args.sub) {
             (Some(agent), true) => format!(" -a {agent} --sub"),
@@ -400,31 +423,46 @@ fn main() {
         stop.store(true, Ordering::Relaxed);
         return;
     }
+    let mut name_search_stopped = false;
+    let mut exact_name = false;
     let mut rows = if args.content && !query.is_empty() {
         sessions::search_content(&query, args.regex)
+    } else if !args.regex && sessions::looks_like_id(&query) {
+        sessions::resolve_id(&query, args.agent.as_deref(), args.sub)
+            .into_iter()
+            .map(|path| Row {
+                agent: sessions::agent_of(&path),
+                mtime: sessions::mtime(&path),
+                path,
+                ..Row::default()
+            })
+            .collect()
     } else {
-        let mut rows = sessions::load_sessions();
-        if !query.is_empty() {
-            let wanted = if args.regex {
-                query.clone()
-            } else {
-                regex::escape(&query)
-            };
-            let pattern = match regex::Regex::new(&format!("(?i){wanted}")) {
-                Ok(pattern) => pattern,
-                Err(err) => {
-                    eprintln!("asf: bad pattern {query:?}: {err}");
-                    std::process::exit(1);
-                }
-            };
-            // the opening message too: a name is what the agent called the session, and you
-            // are more likely to remember what you asked for
-            rows.retain(|r| {
-                pattern.is_match(&r.title)
-                    || pattern.is_match(&r.opening)
-                    || pattern.is_match(&r.path)
-                    || pattern.is_match(&r.cwd)
-            });
+        if args.regex
+            && let Err(err) = regex::Regex::new(&format!("(?i){query}"))
+        {
+            eprintln!("asf: bad pattern {query:?}: {err}");
+            std::process::exit(1);
+        }
+        let limit = if wants_one { 1 } else { args.limit };
+        let exact_pattern = regex::Regex::new(&format!(r"(?i)\A{}\z", regex::escape(&query)))
+            .expect("escaped query");
+        let mut rows = Vec::new();
+        if limit > 0 {
+            sessions::stream_names(
+                &query,
+                args.regex,
+                args.agent.as_deref(),
+                args.sub,
+                &AtomicBool::new(false),
+                |row| {
+                    exact_name =
+                        !args.regex && !query.is_empty() && exact_pattern.is_match(&row.title);
+                    rows.push(row);
+                    name_search_stopped = rows.len() >= limit || exact_name;
+                    !name_search_stopped
+                },
+            );
         }
         rows
     };
@@ -454,7 +492,9 @@ fn main() {
             "resuming"
         };
         let shown = total.min(3);
-        let selection = if total == 1 {
+        let selection = if name_search_stopped {
+            "the newest match (older sessions not searched)".to_string()
+        } else if total == 1 {
             "the only match".to_string()
         } else {
             format!("the newest of {total} matches (top {shown} shown)")
@@ -489,10 +529,22 @@ fn main() {
         rows.truncate(args.limit);
         sessions::hydrate(&mut rows, &query);
         println!("{}", table(&rows, args.content));
-        println!(
-            "\n{total} sessions matched, showing {}",
-            total.min(args.limit)
-        );
+        if name_search_stopped {
+            let reason = if exact_name {
+                "an exact name"
+            } else {
+                "--limit"
+            };
+            println!(
+                "\nshowing the newest {} matches (search stopped at {reason})",
+                rows.len()
+            );
+        } else {
+            println!(
+                "\n{total} sessions matched, showing {}",
+                total.min(args.limit)
+            );
+        }
     } else {
         println!("nothing matched");
     }

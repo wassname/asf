@@ -16,6 +16,7 @@ fn run(home: &str, args: &[&str]) -> Output {
     let out = Command::new(env!("CARGO_BIN_EXE_asf"))
         .args(args)
         .env("HOME", home)
+        .env("XDG_CACHE_HOME", std::env::temp_dir().join(format!("asf-test-cache-{}", std::process::id())))
         .output()
         .unwrap();
     Output {
@@ -431,7 +432,7 @@ fn query_actions_identify_selection_on_stderr_only() {
     assert!(one.success, "{}", one.stderr);
     assert!(one.stdout.starts_with("## "), "{}", one.stdout);
     assert!(
-        one.stderr.contains("asf: reading the only match:"),
+        one.stderr.contains("asf: reading the newest match (older sessions not searched):"),
         "{}",
         one.stderr
     );
@@ -441,7 +442,7 @@ fn query_actions_identify_selection_on_stderr_only() {
     assert!(resume.success, "{}", resume.stderr);
     assert!(resume.stdout.contains("pi --session"), "{}", resume.stdout);
     assert!(
-        resume.stderr.contains("asf: resuming the only match:"),
+        resume.stderr.contains("asf: resuming the newest match (older sessions not searched):"),
         "{}",
         resume.stderr
     );
@@ -451,7 +452,7 @@ fn query_actions_identify_selection_on_stderr_only() {
     assert!(many.stdout.contains("client "), "{}", many.stdout);
     assert!(
         many.stderr
-            .contains("asf: previewing the newest of 8 matches (top 3 shown):"),
+            .contains("asf: previewing the newest match (older sessions not searched):"),
         "{}",
         many.stderr
     );

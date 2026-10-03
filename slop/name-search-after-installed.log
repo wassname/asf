@@ -1,0 +1,7 @@
+| when             | agent | project | name                    | opening                                                      | file                                                                                                                      |
+|------------------|-------|---------|-------------------------|--------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------|
+| 2026-10-03 11:50 | pi    | asf     | Commit and push cleanup | The command that timed out was: ```sh asf -r "$PI_INTERCOM_S | ~/.pi/agent/sessions/--home-code-.agents-skills-asf--/2026-10-02T12-40-35-809Z_01a0fca1-78e0-7597-ac3e-9d4dbcfddc7b.jsonl |
+
+showing the newest 1 matches (search stopped at an exact name)
+
+elapsed_seconds=5.36 max_rss_kb=8924

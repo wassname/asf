@@ -1,0 +1,43 @@
+warning: unused config key `resolver.incompatible-publish-age` in `/workspace/asf/.cargo/config.toml`
+   Compiling asf v0.1.0 (/workspace/asf)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.45s
+     Running unittests src/main.rs (target/debug/deps/asf-e0c2a65c928c446a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/functional.rs (target/debug/deps/functional-96a3d221f18c681b)
+
+running 21 tests
+test absent_stores_are_quiet ... ok
+test a_missing_session_file_fails_fast ... ok
+test opencode_child_ids_need_sub ... ok
+test tool_call_arguments_need_tools ... ok
+test pi_ids_come_from_headers_not_artifacts ... ok
+test hermes_is_read_out_of_its_database ... ok
+test head_and_tail_cut_the_middle_out ... ok
+test tool_role_enables_tool_records ... ok
+test read_exports_markdown ... ok
+test every_agent_is_read ... ok
+test the_name_is_the_one_the_agent_ended_with ... ok
+test short_and_long_action_flags_agree ... ok
+test a_name_search_matches_the_name_and_the_opening_message ... ok
+test each_agent_gets_its_own_resume_command ... ok
+test query_actions_identify_selection_on_stderr_only ... ok
+test role_filtering_keeps_roles_before_tail_across_formats ... ok
+test streaming_names_match_the_complete_scan ... ok
+test each_agent_gives_up_its_name_directory_and_model ... ok
+test a_session_id_finds_its_session ... ok
+test a_content_search_reads_the_whole_transcript ... ok
+test subagent_runs_are_hidden ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.52s
+
+     Running tests/name_search.rs (target/debug/deps/name_search-a946ed51318eaefc)
+
+running 1 test
+test names_are_cached_recent_first_and_refreshed_after_renaming ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
