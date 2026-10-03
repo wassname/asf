@@ -319,6 +319,12 @@ fn one(args: &Args, path: &str) -> ! {
 fn main() {
     unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) }; // let `| head` close the pipe quietly
     let args = Args::parse();
+    if let Some(agent) = &args.agent {
+        if !SOURCES.iter().any(|(a, _)| a == agent) {
+            eprintln!("asf: no such agent {agent:?}");
+            std::process::exit(2);
+        }
+    }
 
     // a path given outright needs no scan; an empty one means "resolve it from the query"
     let one_of = [
@@ -345,12 +351,6 @@ fn main() {
             eprintln!("asf: give a query or a session, not both: {query:?} and {id:?}");
             std::process::exit(2);
         }
-        if let Some(agent) = &args.agent {
-            if !SOURCES.iter().any(|(a, _)| a == agent) {
-                eprintln!("asf: no such agent {agent:?}");
-                std::process::exit(2);
-            }
-        }
         if !args.content && !args.regex {
             let paths = sessions::resolve_id(id, args.agent.as_deref(), args.sub);
             match paths.as_slice() {
@@ -372,12 +372,6 @@ fn main() {
         query = id.to_string();
     }
     if (args.pick || args.stream_rows) && !args.content {
-        if let Some(agent) = &args.agent {
-            if !SOURCES.iter().any(|(a, _)| a == agent) {
-                eprintln!("asf: no such agent {agent:?}");
-                std::process::exit(2);
-            }
-        }
         if args.regex && let Err(err) = regex::Regex::new(&format!("(?i){query}")) {
             eprintln!("asf: bad pattern {query:?}: {err}");
             std::process::exit(1);
@@ -436,10 +430,6 @@ fn main() {
     };
 
     if let Some(agent) = &args.agent {
-        if !SOURCES.iter().any(|(a, _)| a == agent) {
-            eprintln!("asf: no such agent {agent:?}");
-            std::process::exit(2);
-        }
         rows.retain(|r| &r.agent == agent);
     }
     if !args.sub {

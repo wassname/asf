@@ -1,5 +1,0 @@
-id lookup (with strace): elapsed=0.16 exit=0
-path read (without strace): elapsed=0.01 exit=0
-stdout matches direct path read: yes
-distinct transcript files opened: 1 (the requested file)
-subagent-artifact directories opened: 0

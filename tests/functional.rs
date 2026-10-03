@@ -277,13 +277,12 @@ fn a_session_id_finds_its_session() {
             path,
             "{agent}: id {id} is not a query"
         );
-        for action in ["-r", "-p", "-u"] {
-            for query in [id, &id[..id.len() - 4]] {
-                let out = run(HOME, &[action, query]);
-                assert!(out.success, "{agent}: {query}: {}", out.stderr);
-                assert_eq!(out.stdout, asf(&[action, &path]), "{agent}: {query}");
-                assert_eq!(out.stderr, format!("asf: session {path}\n"));
-            }
+        let direct = asf(&["-r", &path]);
+        for query in [id, &id[..id.len() - 4]] {
+            let out = run(HOME, &["-r", query]);
+            assert!(out.success, "{agent}: {query}: {}", out.stderr);
+            assert_eq!(out.stdout, direct, "{agent}: {query}");
+            assert_eq!(out.stderr, format!("asf: session {path}\n"));
         }
     }
 }
@@ -332,119 +331,43 @@ fn pi_session_with_tool_call() -> (std::path::PathBuf, std::path::PathBuf) {
 }
 
 #[test]
-fn pi_header_ids_resolve_when_the_filename_differs() {
+fn pi_ids_come_from_headers_not_artifacts() {
     let (home, path) = pi_session_with_tool_call();
+    let h = home.to_str().unwrap();
     let id = "01a00251-ccf4-7d29-9971-60e6334e483d";
-    let stale_id = "01a00252-ccf4-7d29-9971-60e6334e483d";
-    let renamed = path.parent().unwrap().join(format!("2026-10-02_{stale_id}.jsonl"));
-    std::fs::rename(path, &renamed).unwrap();
-    let path = renamed;
-    for action in ["-r", "-p", "-u"] {
-        for query in [id, &id[..8]] {
-            let out = run(home.to_str().unwrap(), &[action, query]);
-            let direct = run(home.to_str().unwrap(), &[action, path.to_str().unwrap()]);
-            assert!(out.success, "{}", out.stderr);
-            assert_eq!(out.stdout, direct.stdout);
-            assert_eq!(out.stderr, format!("asf: session {}\n", path.display()));
-        }
-    }
-    let wrong_agent = run(home.to_str().unwrap(), &["-r", id, "-a", "claude"]);
-    assert!(!wrong_agent.success);
-    assert!(wrong_agent.stderr.contains("no such session id"));
-    let stale = run(home.to_str().unwrap(), &["-r", stale_id]);
-    assert!(!stale.success);
-    assert!(stale.stderr.contains("no such session id"));
-    std::fs::remove_dir_all(home).unwrap();
-}
-
-#[test]
-fn pi_prefix_ambiguity_includes_header_only_matches() {
-    let (home, path) = pi_session_with_tool_call();
-    let first_id = "01a00251-ccf4-7d29-9971-60e6334e483d";
-    let second_id = "01a00251-ccf4-7d29-9971-60e6334e483e";
-    let named = path
-        .parent()
-        .unwrap()
-        .join(format!("2026-10-02_{first_id}.jsonl"));
-    std::fs::rename(&path, &named).unwrap();
+    let twin = "01a00251-ccf4-7d29-9971-60e6334e483e";
+    let stale = "01a00252-ccf4-7d29-9971-60e6334e483d";
+    let dir = path.parent().unwrap().join("project");
+    let artifacts = dir.join("subagent-artifacts/outputs");
+    std::fs::create_dir_all(&artifacts).unwrap();
+    let renamed = dir.join(format!("2026-10-02_{stale}.jsonl"));
+    std::fs::rename(&path, &renamed).unwrap();
+    std::fs::copy(&renamed, artifacts.join(format!("{id}.jsonl"))).unwrap();
     std::fs::write(
-        &path,
-        format!(
-            "{}\n{}\n",
-            serde_json::json!({"type": "session", "id": second_id}),
-            serde_json::json!({"type": "message", "message": {"role": "user", "content": "second"}})
-        ),
-    )
-    .unwrap();
-    let ambiguous = run(home.to_str().unwrap(), &["-r", &first_id[..8]]);
-    assert!(!ambiguous.success);
-    assert!(
-        ambiguous.stderr.contains("ambiguous session id"),
-        "{}",
-        ambiguous.stderr
-    );
-    assert!(ambiguous.stderr.contains(named.to_str().unwrap()));
-    assert!(ambiguous.stderr.contains(path.to_str().unwrap()));
-    let exact = run(home.to_str().unwrap(), &["-r", first_id]);
-    assert!(exact.success, "{}", exact.stderr);
-    assert!(exact.stdout.contains("assistant speech"));
-    let header = run(home.to_str().unwrap(), &["-r", second_id]);
-    assert!(header.success, "{}", header.stderr);
-    assert_eq!(header.stdout, "## user\nsecond\n");
+        dir.join(format!("2026-10-02_{twin}.jsonl")),
+        format!("{}\n", serde_json::json!({"type": "session", "id": twin})),
+    ).unwrap();
+    let out = run(h, &["-r", id]);
+    assert!(out.success, "{}", out.stderr);
+    assert_eq!(out.stderr, format!("asf: session {}\n", renamed.display()));
+    assert!(out.stdout.contains("assistant speech"));
+    assert!(run(h, &["-r", stale]).stderr.contains("no such session id"));
+    assert!(run(h, &["-r", &id[..7]]).stderr.contains("ambiguous session id"));
     std::fs::remove_dir_all(home).unwrap();
 }
 
 #[test]
-fn ambiguous_ids_fail_and_exact_ids_beat_prefixes() {
-    let (home, path) = pi_session_with_tool_call();
-    std::fs::remove_file(&path).unwrap();
-    for id in ["review", "review-extra"] {
-        let path = path
-            .parent()
-            .unwrap()
-            .join(format!("2026-10-02_{id}.jsonl"));
-        std::fs::write(
-            path,
-            format!(
-                "{}\n{}\n",
-                serde_json::json!({"type": "session", "id": id}),
-                serde_json::json!({"type": "message", "message": {"role": "user", "content": id}})
-            ),
-        )
-        .unwrap();
-    }
-    let home_str = home.to_str().unwrap();
-    let ambiguous = run(home_str, &["-r", "rev", "--sub"]);
-    assert!(!ambiguous.success);
-    assert!(ambiguous.stdout.is_empty());
-    assert!(
-        ambiguous.stderr.contains("ambiguous session id"),
-        "{}",
-        ambiguous.stderr
-    );
-    let exact = run(home_str, &["-r", "review", "--sub"]);
-    assert!(exact.success, "{}", exact.stderr);
-    assert_eq!(exact.stdout, "## user\nreview\n");
-    let hidden = run(home_str, &["-r", "review"]);
-    assert!(!hidden.success);
+fn opencode_child_ids_need_sub() {
+    let (home, _) = pi_session_with_tool_call();
+    let path = home.join(".local/share/opencode/storage/session/project/ses_CHILD.json");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, r#"{"id":"ses_CHILD","parentID":"ses_PARENT"}"#).unwrap();
+    let h = home.to_str().unwrap();
+    assert!(!run(h, &["-u", "ses_CHILD"]).success);
+    let child = run(h, &["-u", "ses_CHILD", "--sub"]);
+    assert!(child.success, "{}", child.stderr);
+    assert!(child.stdout.contains("opencode --session ses_CHILD"));
     std::fs::remove_dir_all(home).unwrap();
-}
-
-#[test]
-fn missing_ids_and_invalid_agents_fail_without_name_search() {
-    let empty_home = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/empty-home");
-    let missing = run(empty_home, &["-r", "01a00251-ccf4-7d29-9971-60e6334e483d"]);
-    assert!(!missing.success);
-    assert!(missing.stdout.is_empty());
-    assert!(missing.stderr.contains("no such session id"));
-    let invalid = run(HOME, &["-r", "01a00251", "-a", "absent"]);
-    assert!(!invalid.success);
-    assert_eq!(invalid.stderr, "asf: no such agent \"absent\"\n");
-    let conflict = run(HOME, &["query", "-r", "01a00251"]);
-    assert!(!conflict.success);
-    assert!(
-        conflict.stderr.contains("give a query or a session, not both")
-    );
 }
 
 fn only_role(text: &str, role: &str) {

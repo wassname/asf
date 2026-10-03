@@ -1,7 +1,0 @@
-warning: unused config key `resolver.incompatible-publish-age` in `/workspace/asf/./.cargo/config.toml`
-warning: unused config key `resolver.incompatible-publish-age` in `/workspace/asf/./.cargo/config.toml`
-  Installing asf v0.1.0 (/workspace/asf)
-   Compiling asf v0.1.0 (/workspace/asf)
-    Finished `release` profile [optimized] target(s) in 38.64s
-   Replacing /home/code/.cargo/bin/asf
-    Replaced package `asf v0.1.0 (/workspace/asf)` with `asf v0.1.0 (/workspace/asf)` (executable `asf`)

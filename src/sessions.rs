@@ -187,7 +187,7 @@ pub fn session_id(path: &str, agent: &str) -> String {
     }
 }
 
-/// Resolve filenames without reading transcripts; Pi IDs come from headers. -- PI/OpenAI
+/// Resolve IDs from session filenames and Pi headers before reading message bodies. -- PI/OpenAI
 pub fn resolve_id(query: &str, agent: Option<&str>, sub: bool) -> Vec<String> {
     let mut matches: Vec<(String, String)> = Vec::new();
     let mut pi_paths = Vec::new();
@@ -205,7 +205,7 @@ pub fn resolve_id(query: &str, agent: Option<&str>, sub: bool) -> Vec<String> {
             "gemini" => 3,
             _ => 2,
         };
-        for path in scan::json_files(&root, Some(depth)) {
+        for path in scan::session_files(&root, depth) {
             let stem = path.file_stem().unwrap_or_default().to_string_lossy();
             if (source == "copilot" && stem != "events")
                 || (source == "opencode" && !stem.starts_with("ses_"))
@@ -227,21 +227,13 @@ pub fn resolve_id(query: &str, agent: Option<&str>, sub: bool) -> Vec<String> {
             if !id.starts_with(query) {
                 continue;
             }
-            let header = if source == "pi" || source == "codex" {
-                first_record(&path)
-            } else {
-                None
-            };
-            let id = if source == "pi" {
-                header.as_ref().map_or(id, |h| find_value(h, "id"))
-            } else {
-                id
-            };
+            let id = session_id(&path, source);
             let child = match source {
                 "pi" => UUID.find(&id).is_none(),
-                "codex" => header
-                    .as_ref()
+                "codex" => first_record(&path)
                     .is_some_and(|h| h.to_string().contains("\"subagent\"")),
+                "opencode" => read_json(Path::new(&path))
+                    .is_some_and(|h| h.get("parentID").is_some()),
                 _ => false,
             };
             if id.starts_with(query) && (sub || !child) {
@@ -249,7 +241,9 @@ pub fn resolve_id(query: &str, agent: Option<&str>, sub: bool) -> Vec<String> {
             }
         }
     }
-    if !matches.iter().any(|(id, _)| id == query) && (looks_like_id(query) || sub) {
+    if !matches.iter().any(|(id, _)| id == query)
+        && (sub || !matches.is_empty() || query.bytes().all(|c| c.is_ascii_hexdigit() || c == b'-'))
+    {
         for path in pi_paths {
             let id = session_id(&path, "pi");
             if id.starts_with(query) && (sub || UUID.find(&id).is_some()) {
@@ -620,7 +614,7 @@ pub fn stream_names(
         .filter(|(source, _)| agent.is_none_or(|a| a == source))
         .flat_map(|(source, roots)| {
             roots.into_iter().take(if source == "gemini" { 1 } else { usize::MAX }).flat_map(move |root| {
-                scan::json_files(&root, None).into_iter().map({
+                scan::json_files(&root).into_iter().map({
                     let source = source.clone();
                     move |path| {
                         let changed = mtime(&path.to_string_lossy());
