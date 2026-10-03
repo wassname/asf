@@ -36,7 +36,8 @@ asf -r "$PI_INTERCOM_SESSION_ID" --role user --tail 10
 
 `--role user|assistant|tool` filters before `--head` and `--tail`. `--tools` keeps tool
 calls/results; `--think` keeps reasoning. `--role tool` enables `--tools`.
-`-a AGENT` limits the agent before scanning; `--sub` includes subagent sessions. See `asf --help` for all flags.
+`-a AGENT` limits results to one agent; in name search, it also limits which stores are
+scanned. `--sub` includes subagent sessions. See `asf --help` for all flags.
 
 Name search reads sessions newest-first and stops at `-n` matches or an exact name
 match (literal queries only). Read/preview/resume by name stops at the first match. These searches do not count older matches. IDs use

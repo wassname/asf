@@ -54,7 +54,7 @@ Examples:
   asf -p lucid               one-screen preview of the newest match
   asf -u lucid               print the command that reopens it, and so its id
 
--n is --limit (rows to print), not a name: the name is the plain query word.
+-n limits matches; put the session name in the query.
 
 Name search, the default, matches the session's own name, its project, and the first thing
 you said. It uses cached metadata, reads newest-first, and stops at --limit matches
@@ -68,9 +68,8 @@ A name is whichever the agent kept: the one you typed (claude /rename, a codex t
 a pi --session-id), then the one its UI shows, then your opening message. Where a session was
 renamed part way through, this is the name it ended with.
 
-Runs an agent started for itself are hidden, because you cannot resume them. --sub shows them.
-For pi that means every session with a name, since pi gives its own a uuid and only a tool
-passes --session-id.
+Subagent sessions are hidden unless you use --sub.
+Pi sessions with non-UUID IDs are treated as subagents; renaming a session does not hide it.
 
 Read your current Pi transcript when you need exact earlier wording, decisions, or context:
 `asf -r \"$PI_INTERCOM_SESSION_ID\" --tail 40`.
@@ -101,7 +100,7 @@ struct Args {
     /// only this agent
     #[arg(short, long)]
     agent: Option<String>,
-    /// include claude subagent logs, which cannot be resumed
+    /// include subagent sessions
     #[arg(long)]
     sub: bool,
     /// maximum matches; name search stops here, content search limits output only
