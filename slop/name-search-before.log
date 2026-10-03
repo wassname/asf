@@ -1,8 +1,0 @@
-Baseline: installed /home/code/.cargo/bin/asf, before this patch.
-Command: asf -a pi 'Commit and push cleanup' -n 1
-At 303 seconds: still running, no search output.
-/proc/44416/io: rchar=15660079967; read_bytes=16855715840.
-ps: state D, wait_on_buffer (blocked on storage I/O).
-Cancelled rather than continue a full-store benchmark on the shared disk.
-This is a lower bound, not a completed timing or a controlled speed ratio.
--- PI/OpenAI
