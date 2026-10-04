@@ -1,7 +1,7 @@
 //! Where the sessions live, how each agent names one, and how to read one back.
 
 use crate::hermes;
-use crate::name_cache::NameCache;
+use crate::metadata::MetadataIndex;
 use crate::record::*;
 use crate::scan::{self, Hits, JSONISH, Scan};
 use serde_json::Value;
@@ -62,16 +62,20 @@ pub fn store(agent: &str) -> PathBuf {
     home().join(tail)
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Row {
+    pub id: String,
     pub path: String,
+    #[serde(skip)]
     pub hit: String,
     pub agent: String,
     pub cwd: String,
     pub title: String,
+    #[serde(skip)]
     pub matched: String,
     /// the first thing you said, kept even when a name replaces it in the title
     pub opening: String,
+    #[serde(skip)]
     pub raw: String,
     pub mtime: f64,
     pub line: u64,
@@ -190,6 +194,11 @@ pub fn session_id(path: &str, agent: &str) -> String {
 
 /// Resolve IDs from session filenames and Pi headers before reading message bodies. -- PI/OpenAI
 pub fn resolve_id(query: &str, agent: Option<&str>, sub: bool) -> Vec<String> {
+    let mut index = MetadataIndex::load();
+    let cached = index.exact_id(query, agent, sub);
+    if !cached.is_empty() {
+        return cached;
+    }
     let mut matches: Vec<(String, String)> = Vec::new();
     let mut pi_paths = Vec::new();
     for (source, _) in SOURCES {
@@ -299,7 +308,12 @@ pub fn resume_command(row: &Row) -> String {
             row.agent, row.path
         );
     };
-    let cmd = template.replace("{sid}", &session_id(&row.path, &row.agent));
+    let id = if row.id.is_empty() {
+        session_id(&row.path, &row.agent)
+    } else {
+        row.id.clone()
+    };
+    let cmd = template.replace("{sid}", &id);
     if row.cwd.is_empty() {
         return cmd;
     }
@@ -325,16 +339,16 @@ pub fn resume_for_path(hit: &str) -> String {
         };
         return resume_command(&row);
     }
-    let mut row = Row {
-        path: path.clone(),
-        agent: agent.clone(),
-        ..Row::default()
-    };
-    name_sessions(&[(agent, vec![PathBuf::from(&path)])], |_, found| {
-        if row.cwd.is_empty() {
-            row.cwd = found.cwd;
-        }
-    });
+    let mut index = MetadataIndex::load();
+    let row = index
+        .refresh(Path::new(&path), &agent)
+        .into_iter()
+        .next()
+        .unwrap_or(Row {
+            path,
+            agent,
+            ..Row::default()
+        });
     resume_command(&row)
 }
 
@@ -638,6 +652,26 @@ fn typed_names(rows: &mut [Row]) {
     }
 }
 
+pub(crate) fn standalone_metadata(path: &Path, agent: &str) -> Option<Row> {
+    let mut rows = Rows::default();
+    name_sessions(
+        &[(agent.to_string(), vec![path.to_path_buf()])],
+        |path, found| rows.add_name(path, found),
+    );
+    rows.into_vec().into_iter().next()
+}
+
+pub fn indexed_row(path: &str) -> Option<Row> {
+    let agent = agent_of(path);
+    let mut rows = if agent == "hermes" {
+        hermes::session_of(path).into_iter().collect()
+    } else {
+        MetadataIndex::load().refresh(Path::new(path), &agent)
+    };
+    typed_names(&mut rows);
+    rows.into_iter().next()
+}
+
 pub fn stream_names(
     query: &str,
     regex: bool,
@@ -646,17 +680,11 @@ pub fn stream_names(
     stop: &AtomicBool,
     mut send: impl FnMut(Row) -> bool,
 ) {
-    let wanted = if regex {
-        query.to_string()
-    } else {
-        regex::escape(query)
-    };
-    let pattern = regex::Regex::new(&format!("(?i){wanted}")).expect("bad query");
     enum Candidate {
         File(String, PathBuf),
         Hermes(Row),
     }
-    let mut cache = NameCache::load();
+    let mut cache = MetadataIndex::load();
     let mut files: Vec<(f64, Candidate)> = SOURCES
         .iter()
         .filter(|(source, _)| *source != "hermes" && agent.is_none_or(|a| a == *source))
@@ -699,27 +727,13 @@ pub fn stream_names(
         );
     }
     files.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let mut indexed_rows = Vec::new();
     for (changed, candidate) in files {
         if stop.load(Ordering::Relaxed) {
             return;
         }
         let mut rows = match candidate {
-            Candidate::File(source, path) => {
-                if let Some(rows) = cache.get(&path, &source) {
-                    rows
-                } else {
-                    let before = NameCache::stamp(&path);
-                    let mut rows = Rows::default();
-                    name_sessions(&[(source, vec![path.clone()])], |path, found| {
-                        rows.add_name(path, found)
-                    });
-                    let rows = rows.into_vec();
-                    if let Some(before) = before {
-                        cache.put(&path, &rows, &before);
-                    }
-                    rows
-                }
-            }
+            Candidate::File(source, path) => cache.refresh(&path, &source),
             Candidate::Hermes(row) => vec![row],
         };
         typed_names(&mut rows);
@@ -734,16 +748,17 @@ pub fn stream_names(
                         .to_string();
                 }
             }
-            if (sub || !row.sub)
-                && (query.is_empty()
-                    || pattern.is_match(&row.title)
-                    || pattern.is_match(&row.opening)
-                    || pattern.is_match(&row.path)
-                    || pattern.is_match(&row.cwd))
-                && !send(row)
-            {
-                return;
+            if sub || !row.sub {
+                if row.id.is_empty() {
+                    row.id = session_id(&row.path, &row.agent);
+                }
+                indexed_rows.push(row);
             }
+        }
+    }
+    for row in cache.search(indexed_rows, query, regex) {
+        if stop.load(Ordering::Relaxed) || !send(row) {
+            return;
         }
     }
 }
@@ -886,7 +901,7 @@ pub fn hydrate(rows: &mut [Row], query: &str) {
     let unnamed: Vec<usize> = rows
         .iter()
         .enumerate()
-        .filter(|(_, r)| r.title.is_empty())
+        .filter(|(_, r)| r.title.is_empty() && r.id.is_empty())
         .map(|(i, _)| i)
         .collect();
     if unnamed.is_empty() {

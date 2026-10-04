@@ -9,7 +9,7 @@
 //!
 
 mod hermes;
-mod name_cache;
+mod metadata;
 mod pick;
 mod record;
 mod scan;
@@ -56,13 +56,12 @@ Examples:
 
 -n limits matches; put the session name in the query.
 
-Name search, the default, matches the session's own name, its project, and the first thing
-you said. It uses cached metadata, reads newest-first, and stops at --limit matches
-or an exact name match (literal queries only).
-Read/preview/resume by name stops at the newest match; older matches are not counted.
-Uncached or changed metadata can require a full file scan. Content search, -c, reads every
-message, what the assistant said and what tools printed included, and scans all stores.
-Both take a literal phrase and ignore case; --re opts into a pattern.
+Name search matches cached IDs, names, projects, and opening messages using FFF.
+Results are newest-first, limited by -n or an exact name (literal queries only).
+Read/preview/resume selects the newest match. Queries ignore case; --re uses a regex.
+Metadata updates automatically; JSONL appends are read from the saved offset.
+The first indexing run can be slow: use asf --refresh before searching.
+Content search, -c, still scans full transcripts, including assistant and tool messages.
 
 A name is whichever the agent kept: the one you typed (claude /rename, a codex thread name,
 a pi --session-id), then the one its UI shows, then your opening message. Where a session was
@@ -91,6 +90,9 @@ struct Args {
     /// search the whole transcript, not the name
     #[arg(short, long)]
     content: bool,
+    /// refresh all session metadata without searching
+    #[arg(long)]
+    refresh: bool,
     /// treat the query as a regular expression, not a phrase
     #[arg(long = "re")]
     regex: bool,
@@ -330,6 +332,23 @@ fn main() {
         }
     }
 
+    if args.refresh {
+        let mut count = 0;
+        sessions::stream_names(
+            "",
+            false,
+            args.agent.as_deref(),
+            args.sub,
+            &AtomicBool::new(false),
+            |_| {
+                count += 1;
+                true
+            },
+        );
+        println!("Refreshed metadata for {count} sessions.");
+        return;
+    }
+
     // a path given outright needs no scan; an empty one means "resolve it from the query"
     let one_of = [
         args.read.as_deref(),
@@ -429,12 +448,7 @@ fn main() {
     } else if !args.regex && sessions::looks_like_id(&query) {
         sessions::resolve_id(&query, args.agent.as_deref(), args.sub)
             .into_iter()
-            .map(|path| Row {
-                agent: sessions::agent_of(&path),
-                mtime: sessions::mtime(&path),
-                path,
-                ..Row::default()
-            })
+            .filter_map(|path| sessions::indexed_row(&path))
             .collect()
     } else {
         if args.regex

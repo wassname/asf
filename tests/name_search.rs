@@ -55,13 +55,13 @@ fn names_are_cached_recent_first_and_refreshed_after_renaming() {
         run(&home, &["--paths", "-a", "pi", "-n", "1"]).trim(),
         recent.to_str().unwrap()
     );
-    let cache_path = home.join("cache/asf/names-v1.json");
+    let cache_path = home.join("cache/asf/metadata-v2/index.json");
     let cache: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&cache_path).unwrap()).unwrap();
     assert!(cache.get(recent.to_str().unwrap()).is_some());
     assert!(
-        cache.get(old.to_str().unwrap()).is_none(),
-        "older transcript was scanned after reaching the limit"
+        cache.get(old.to_str().unwrap()).is_some(),
+        "the first lookup must populate all metadata"
     );
 
     assert_eq!(
@@ -70,10 +70,7 @@ fn names_are_cached_recent_first_and_refreshed_after_renaming() {
     );
     let cache: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&cache_path).unwrap()).unwrap();
-    assert!(
-        cache.get(old.to_str().unwrap()).is_none(),
-        "an exact recent name did not stop the default search"
-    );
+    assert!(cache.get(old.to_str().unwrap()).is_some());
     let first = run(&home, &["recent name", "-n", "1"]);
     assert!(first.contains("recent name"));
     assert_eq!(run(&home, &["recent name", "-n", "1"]), first);
@@ -98,6 +95,61 @@ fn names_are_cached_recent_first_and_refreshed_after_renaming() {
     assert_eq!(run(&home, &["recent name"]), "nothing matched\n");
     assert_eq!(run(&home, &["renamed in middle", "-n", "1"]), renamed);
 
+    use std::io::Write;
+    let mut writer = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&recent)
+        .unwrap();
+    writer
+        .write_all(b"{\"type\":\"session_info\",\"name\":\"split")
+        .unwrap();
+    assert!(run(&home, &["renamed in middle", "-a", "pi"]).contains("renamed in middle"));
+    writer.write_all(b" rename\"}\n").unwrap();
+    assert!(run(&home, &["split rename", "-a", "pi"]).contains("split rename"));
+    assert_eq!(
+        run(&home, &["renamed in middle", "-a", "pi"]),
+        "nothing matched\n"
+    );
+    assert_eq!(
+        run(&home, &["/tmp", "-a", "pi", "--paths", "-n", "1"]).trim(),
+        recent.to_str().unwrap()
+    );
+    assert!(
+        run(&home, &["-u", "01a10007-446e-7029-9d46-254776d94b86"])
+            .contains("pi --session 01a10007-446e-7029-9d46-254776d94b86")
+    );
+    std::fs::write(
+        &recent,
+        session("01a10007-446e-7029-9d46-254776d94b86", "after truncate"),
+    )
+    .unwrap();
+    assert!(run(&home, &["after truncate", "-a", "pi"]).contains("after truncate"));
+    assert_eq!(
+        run(&home, &["split rename", "-a", "pi"]),
+        "nothing matched\n"
+    );
+    let mut writer = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&recent)
+        .unwrap();
+    writer
+        .write_all(br#"{"type":"session_info","name":"before newline"}"#)
+        .unwrap();
+    assert!(run(&home, &["before newline", "-a", "pi"]).contains("before newline"));
+    let cached: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&cache_path).unwrap()).unwrap();
+    assert_eq!(
+        cached[recent.to_str().unwrap()]["offset"].as_u64().unwrap(),
+        recent.metadata().unwrap().len()
+    );
+    writer.write_all(b"\n").unwrap();
+    writeln!(
+        writer,
+        "{}",
+        serde_json::json!({"type":"session_info", "name":r"ΟΣ metadata \n"})
+    )
+    .unwrap();
+    assert!(run(&home, &[r"οσ METADATA \n", "-a", "pi"]).contains(r"ΟΣ metadata \n"));
     std::fs::remove_file(&recent).unwrap();
     assert_eq!(run(&home, &["renamed in middle"]), "nothing matched\n");
     assert_eq!(

@@ -14,6 +14,8 @@ grep-searcher = "0.1.17"
 # preserve_order: a record's keys must come back in the order the agent wrote them,
 # because the first `text` key found is the one shown
 serde_json = { version = "1.0.151", features = ["preserve_order"] }
+serde = { version = "1.0", features = ["derive"] }
+fff-search = "=0.11.0"
 clap = { version = "4.6", features = ["derive"] }
 skim = "0.20"
 regex = "1.11"

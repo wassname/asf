@@ -1,12 +1,13 @@
 # asf - agent session finder
 
 Find a coding-agent session by name or transcript text. Supports Claude Code, Codex,
-Pi, OpenCode, Gemini, Copilot, and Hermes. Searches transcript text directly; caches session metadata.
+Pi, OpenCode, Gemini, Copilot, and Hermes. Uses FFF to search cached session metadata;
+`-c` searches transcript text.
 
 ## Install
 
 ```sh
-cargo install --path . --locked
+cargo +stable install --path . --locked
 ```
 
 Put `~/.cargo/bin` on `PATH`. Hermes also needs `sqlite3`.
@@ -14,6 +15,7 @@ Put `~/.cargo/bin` on `PATH`. Hermes also needs `sqlite3`.
 ## Use
 
 ```sh
+asf --refresh              # build or update the metadata index
 asf                        # newest sessions
 asf steer                  # search names, projects, and opening messages
 asf -c "staging dir"       # search transcript text
@@ -39,20 +41,21 @@ calls/results; `--think` keeps reasoning. `--role tool` enables `--tools`.
 `-a AGENT` limits results to one agent; in name search, it also limits which stores are
 scanned. `--sub` includes subagent sessions. See `asf --help` for all flags.
 
-Name search reads sessions newest-first and stops at `-n` matches or an exact name
-match (literal queries only). Read/preview/resume by name stops at the first match. These searches do not count older matches. IDs use
-filenames first, then Pi headers when needed. Transcript search (`-c`) remains exhaustive.
+Metadata results are newest-first, limited by `-n` or an exact name match (literal
+queries only). Read/preview/resume selects the newest match. Exact IDs use cached
+metadata first, then filename and header lookup. `-c` still scans full transcripts.
 
-Metadata is cached in `${XDG_CACHE_HOME:-~/.cache}/asf/names-v1.json`, checked against
-file size and nanosecond modification time. Changed and uncached transcripts are read
-again. Pi/Claude rename lookup tries the last 64 KB before a full metadata scan; names
-in the middle still work. The first broad name search can be slower while the cache fills.
-Delete the cache to rebuild it. <!-- PI/OpenAI -->
+The index updates automatically. Unchanged transcripts are not opened; append-only
+JSONL logs are read from their saved offset. The first indexing run can be slow.
+Use `asf --refresh` to complete it before searching.
+
+Cache: `${XDG_CACHE_HOME:-~/.cache}/asf/metadata-v2/`. After editing old records,
+delete this directory and run `asf --refresh`. <!-- PI/OpenAI -->
 
 ## Picker
 
-The picker opens immediately and adds sessions newest first. Name search filters as rows
-arrive; transcript search scans the full store before showing matches.
+The picker opens immediately. After metadata refresh, results arrive newest-first.
+Transcript search scans the full store before showing matches.
 
 - `enter`: resume command; `alt-p`: transcript path; `alt-m`: markdown transcript
 - `ctrl-q`: switch name/transcript search
@@ -62,7 +65,7 @@ arrive; transcript search scans the full store before showing matches.
 ## Development
 
 ```sh
-cargo test --locked
+cargo +stable test --locked
 ```
 
 Dependency changes use `cargo +nightly update` to retain the eight-day publish-age hold.
