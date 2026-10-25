@@ -1,0 +1,21 @@
+warning: ignoring `resolver.incompatible-publish-age` without `-Zmin-publish-age`
+warning: ignoring `registry.global-min-publish-age` without `-Zmin-publish-age`
+   Compiling asf v0.1.0 (/workspace/asf)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.63s
+     Running tests/transcript_filters.rs (target/debug/deps/transcript_filters-8fccd2da2d06e87e)
+
+running 11 tests
+test markdown_role_filter_does_not_merge_user_turns_separated_by_an_assistant ... ok
+test cwd_matches_symlinks_but_not_project_path_prefixes ... ok
+test pi_message_milliseconds_and_local_dates_are_supported ... ok
+test role_selection_uses_records_not_headings_inside_message_text ... ok
+test date_and_role_filters_precede_head_and_tail_without_jsonl_markers ... ok
+test jsonl_preserves_distinct_records_even_when_text_is_repeated_or_shortened ... ok
+test unknown_or_invalid_times_are_null_and_never_filled_from_headers_or_nested_tools ... ok
+test relative_windows_use_message_time_and_empty_jsonl_is_successful ... ok
+test invalid_or_reversed_dates_fail_before_search_and_read_flags_require_read ... ok
+test fixture_formats_share_a_jsonl_schema_with_traceable_sources ... ok
+test cwd_filtering_happens_before_limits_exact_name_stops_and_newest_selection ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+

@@ -5,6 +5,7 @@
 
 use crate::record::{Show, clean, window};
 use crate::sessions::{Row, home};
+use crate::transcript::{Message, Source, unix_seconds};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::process::Command;
@@ -135,13 +136,13 @@ pub fn search_content(pattern: &regex::Regex, query_text: &str) -> Vec<Row> {
     rows
 }
 
-/// One block per message, the same shape the jsonl agents get.
-pub fn blocks(path: &str, show: Show) -> Vec<String> {
+/// Read message times and row IDs with the visible text. -- PI/OpenAI
+pub fn messages(session: &Row, show: Show) -> Vec<Message> {
     let sql = format!(
-        "select role, coalesce(content,'') as content, coalesce(tool_name,'') as tool_name,
+        "select id, timestamp, role, coalesce(content,'') as content, coalesce(tool_name,'') as tool_name,
          coalesce(tool_calls,'') as tool_calls, coalesce(reasoning,'') as reasoning
          from messages where session_id = '{}' order by timestamp, id",
-        id_of(path)
+        id_of(&session.path)
     );
     query(&sql)
         .iter()
@@ -169,7 +170,19 @@ pub fn blocks(path: &str, show: Show) -> Vec<String> {
             if said.is_empty() {
                 return None;
             }
-            Some(format!("## {}\n{}", text(row, "role"), said.join("\n")))
+            Some(Message::new(
+                session,
+                unix_seconds(&row["timestamp"]),
+                text(row, "role"),
+                said.join("\n"),
+                Source {
+                    path: session.path.clone(),
+                    line: None,
+                    index: None,
+                    record_id: Some(row["id"].to_string()),
+                    parts: Vec::new(),
+                },
+            ))
         })
         .collect()
 }

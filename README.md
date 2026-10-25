@@ -41,6 +41,36 @@ calls/results; `--think` keeps reasoning. `--role tool` enables `--tools`.
 `-a AGENT` limits results to one agent; in name search, it also limits which stores are
 scanned. `--sub` includes subagent sessions. See `asf --help` for all flags.
 
+## Project, time, and JSONL filters
+
+```sh
+asf --cwd . --paths                         # sessions from this exact directory
+asf -r "$PI_INTERCOM_SESSION_ID" --role user --since 24h
+asf -r <file> --since 2026-10-24 --until 2026-10-25
+asf -r <file> --jsonl | jq 'select(.role == "user")'
+```
+
+`--cwd` resolves relative paths from the calling directory and matches equivalent symlink
+paths, not subdirectories or similar project names. It filters before limits and newest-match
+selection, including content search and picker reloads. Unknown working directories do not match.
+
+`--since` and `--until` require `--read` and filter message times, not file modification times.
+Both bounds are inclusive. Use an RFC3339 timestamp with an offset, a local date at midnight,
+`now`, or a fixed duration before now (`s`, `m`, `h`, `d`, `w`). Role and time filters run
+before `--head`/`--tail`. Unknown or invalid timestamps are excluded with a count on stderr.
+A date-only `--until 2026-10-25` means midnight starting that day, not its end.
+
+`--jsonl` requires `--read`. Each line has `session_id`, `agent`, `cwd`, `timestamp` (UTC
+RFC3339 or null), `role`, `text`, and `source`. Source locations use a file and 1-based line
+for JSONL, a 1-based array index for Gemini, message/part files for OpenCode, or a database
+session and row ID for Hermes. Missing fields are null; no timestamp is inferred from file age.
+Text follows the same tool/reasoning visibility flags as Markdown. JSONL retains distinct
+source records even when their text repeats; Markdown still collapses adjacent resend copies.
+Head/tail cuts add no omission records to JSONL. An empty JSONL selection succeeds with no output.
+
+User-role records can be automated prompts, not human messages. The role filter does not
+establish authorship.
+
 Metadata results are newest-first, limited by `-n` or an exact name match (literal
 queries only). Read/preview/resume selects the newest match. Exact IDs use cached
 metadata first, then filename and header lookup. `-c` still scans full transcripts.

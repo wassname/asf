@@ -14,12 +14,13 @@ mod pick;
 mod record;
 mod scan;
 mod sessions;
+mod transcript;
 
 use clap::{Parser, ValueEnum};
 use sessions::{Row, SOURCES};
 use std::io::{BufReader, BufWriter, Cursor, Write};
 use std::os::unix::net::UnixStream;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -128,6 +129,18 @@ struct Args {
     /// with --read, keep only user, assistant, or tool records; --role tool also enables --tools
     #[arg(long, value_enum, requires = "read")]
     role: Option<Role>,
+    /// with --read, emit normalized messages as JSONL for jq or other tools
+    #[arg(long, requires = "read")]
+    jsonl: bool,
+    /// with --read, messages at or after this time (RFC3339, local date, or 24h)
+    #[arg(long, requires = "read", value_parser = parse_time)]
+    since: Option<jiff::Timestamp>,
+    /// with --read, messages at or before this time (RFC3339, local date, or 24h)
+    #[arg(long, requires = "read", value_parser = parse_time)]
+    until: Option<jiff::Timestamp>,
+    /// only sessions from this exact directory; relative paths resolve from here
+    #[arg(long, value_parser = normalize_path)]
+    cwd: Option<PathBuf>,
     /// with --read, only the first N messages
     #[arg(long, default_value_t = 0)]
     head: usize,
@@ -143,6 +156,54 @@ struct Args {
     /// with --read or --preview, the record on that line
     #[arg(long, default_value_t = 0)]
     line: u64,
+}
+
+fn parse_time(value: &str) -> Result<jiff::Timestamp, String> {
+    transcript::time_bound(value, jiff::Timestamp::now())
+}
+
+fn normalize_path(value: &str) -> Result<PathBuf, String> {
+    let absolute = std::path::absolute(value).map_err(|error| error.to_string())?;
+    let mut normalized = PathBuf::new();
+    for part in absolute.components() {
+        match part {
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::CurDir => {}
+            _ => normalized.push(part.as_os_str()),
+        }
+    }
+    Ok(normalized.canonicalize().unwrap_or(normalized))
+}
+
+fn matches_cwd(row: &Row, cwd: Option<&Path>) -> bool {
+    cwd.is_none_or(|cwd| {
+        Path::new(&row.cwd).is_absolute() && normalize_path(&row.cwd).is_ok_and(|path| path == cwd)
+    })
+}
+
+fn path_matches_cwd(path: &str, cwd: Option<&Path>) -> bool {
+    cwd.is_none_or(|cwd| {
+        sessions::indexed_row(path).is_some_and(|row| matches_cwd(&row, Some(cwd)))
+    })
+}
+
+fn picker_filters(args: &Args) -> String {
+    let mut filters = String::new();
+    if let Some(agent) = &args.agent {
+        filters.push_str(&format!(" -a {agent}"));
+    }
+    if args.sub {
+        filters.push_str(" --sub");
+    }
+    if let Some(cwd) = &args.cwd {
+        filters.push_str(&format!(
+            " --cwd '{}'",
+            cwd.to_string_lossy().replace('\'', "'\\''")
+        ));
+    }
+    filters
 }
 
 fn project(row: &Row) -> String {
@@ -281,12 +342,16 @@ fn stream_rows(
     regex: bool,
     agent: Option<&str>,
     sub: bool,
+    cwd: Option<&Path>,
     stop: &AtomicBool,
     output: impl Write,
 ) {
     let mut writer = BufWriter::new(output);
     let mut count = 0;
     sessions::stream_names(query, regex, agent, sub, stop, |row| {
+        if !matches_cwd(&row, cwd) {
+            return true;
+        }
         count += 1;
         count <= pick::ROWS
             && writeln!(writer, "{}", rows_tsv(&[row])).is_ok()
@@ -296,25 +361,48 @@ fn stream_rows(
 
 /// Whichever of --read/--preview/--resume was asked for, against one transcript.
 fn one(args: &Args, path: &str) -> ! {
+    let absolute;
+    let path = if path.contains('#') {
+        path
+    } else {
+        absolute = std::path::absolute(path).expect("cannot resolve session path");
+        absolute.to_str().expect("session path is not UTF-8")
+    };
+    if !path_matches_cwd(path, args.cwd.as_deref()) {
+        eprintln!("asf: session does not match --cwd: {path}");
+        std::process::exit(1);
+    }
     let out = if args.read.is_some() {
         let show = record::Show {
             tools: args.tools || matches!(args.role, Some(Role::Tool)),
             think: args.think,
         };
-        sessions::read(
+        transcript::read(
             path,
-            args.head,
-            args.tail,
-            args.line,
-            show,
-            args.role.map(Role::as_str),
+            transcript::ReadOptions {
+                head: args.head,
+                tail: args.tail,
+                at: args.line,
+                show,
+                role: args.role.map(Role::as_str),
+                since: args.since,
+                until: args.until,
+                jsonl: args.jsonl,
+            },
         )
+        .unwrap_or_else(|error| {
+            eprintln!("asf: {error}");
+            std::process::exit(1);
+        })
     } else if args.preview.is_some() {
         sessions::preview(path, args.line)
     } else {
         sessions::resume_for_path(path)
     };
     if out.trim().is_empty() {
+        if args.jsonl {
+            std::process::exit(0);
+        }
         eprintln!("asf: no session records in {path}");
         std::process::exit(1);
     }
@@ -325,6 +413,14 @@ fn one(args: &Args, path: &str) -> ! {
 fn main() {
     unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) }; // let `| head` close the pipe quietly
     let args = Args::parse();
+    if args
+        .since
+        .zip(args.until)
+        .is_some_and(|(since, until)| since > until)
+    {
+        eprintln!("asf: --since must not be after --until");
+        std::process::exit(2);
+    }
     if let Some(agent) = &args.agent {
         if !SOURCES.iter().any(|(a, _)| a == agent) {
             eprintln!("asf: no such agent {agent:?}");
@@ -340,8 +436,10 @@ fn main() {
             args.agent.as_deref(),
             args.sub,
             &AtomicBool::new(false),
-            |_| {
-                count += 1;
+            |row| {
+                if matches_cwd(&row, args.cwd.as_deref()) {
+                    count += 1;
+                }
                 true
             },
         );
@@ -377,7 +475,10 @@ fn main() {
             std::process::exit(2);
         }
         if !args.content && !args.regex {
-            let paths = sessions::resolve_id(id, args.agent.as_deref(), args.sub);
+            let paths: Vec<String> = sessions::resolve_id(id, args.agent.as_deref(), args.sub)
+                .into_iter()
+                .filter(|path| path_matches_cwd(path, args.cwd.as_deref()))
+                .collect();
             match paths.as_slice() {
                 [path] => {
                     eprintln!("asf: session {path}");
@@ -409,6 +510,7 @@ fn main() {
                 args.regex,
                 args.agent.as_deref(),
                 args.sub,
+                args.cwd.as_deref(),
                 &AtomicBool::new(false),
                 std::io::stdout().lock(),
             );
@@ -421,22 +523,19 @@ fn main() {
         let worker_agent = args.agent.clone();
         let sub = args.sub;
         let regex = args.regex;
+        let cwd = args.cwd.clone();
         std::thread::spawn(move || {
             stream_rows(
                 &worker_query,
                 regex,
                 worker_agent.as_deref(),
                 sub,
+                cwd.as_deref(),
                 &worker_stop,
                 writer,
             );
         });
-        let filters = match (&args.agent, args.sub) {
-            (Some(agent), true) => format!(" -a {agent} --sub"),
-            (Some(agent), false) => format!(" -a {agent}"),
-            (None, true) => " --sub".to_string(),
-            (None, false) => String::new(),
-        };
+        let filters = picker_filters(&args);
         pick::pick(Box::new(BufReader::new(reader)), &filters, &query);
         stop.store(true, Ordering::Relaxed);
         return;
@@ -469,6 +568,9 @@ fn main() {
                 args.sub,
                 &AtomicBool::new(false),
                 |row| {
+                    if !matches_cwd(&row, args.cwd.as_deref()) {
+                        return true;
+                    }
                     exact_name =
                         !args.regex && !query.is_empty() && exact_pattern.is_match(&row.title);
                     rows.push(row);
@@ -482,6 +584,12 @@ fn main() {
 
     if let Some(agent) = &args.agent {
         rows.retain(|r| &r.agent == agent);
+    }
+    if args.cwd.is_some() {
+        if args.content {
+            sessions::hydrate(&mut rows, &query);
+        }
+        rows.retain(|row| matches_cwd(row, args.cwd.as_deref()));
     }
     if !args.sub {
         if args.content {
@@ -522,13 +630,7 @@ fn main() {
         rows.truncate(pick::ROWS);
         sessions::hydrate(&mut rows, &query);
         // the picker reruns me for its transcript search, so it needs the same filters back
-        let mut filters = String::new();
-        if let Some(agent) = &args.agent {
-            filters.push_str(&format!(" -a {agent}"));
-        }
-        if args.sub {
-            filters.push_str(" --sub");
-        }
+        let filters = picker_filters(&args);
         pick::pick(Box::new(Cursor::new(rows_tsv(&rows))), &filters, &query);
     } else if args.rows {
         rows.truncate(args.limit);

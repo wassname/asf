@@ -383,7 +383,7 @@ fn first_real(hits: &[scan::Hit]) -> (u64, String) {
     (1, String::new())
 }
 
-fn read_json(path: &Path) -> Option<Value> {
+pub(crate) fn read_json(path: &Path) -> Option<Value> {
     parse(&std::fs::read_to_string(path).ok()?)
 }
 
@@ -939,7 +939,7 @@ pub fn hydrate(rows: &mut [Row], query: &str) {
     typed_names(rows);
 }
 
-fn opencode_messages(session_json: &str) -> Vec<(PathBuf, Vec<PathBuf>)> {
+pub(crate) fn opencode_messages(session_json: &str) -> Vec<(PathBuf, Vec<PathBuf>)> {
     let root = store("opencode");
     let session = Path::new(session_json).file_stem().unwrap_or_default();
     let mut messages = scan::files_under(&root.join("message").join(session), "msg_");
@@ -955,25 +955,6 @@ fn opencode_messages(session_json: &str) -> Vec<(PathBuf, Vec<PathBuf>)> {
         .collect()
 }
 
-/// opencode splits a session over storage/message/<ses>/ and storage/part/<msg>/.
-fn opencode_transcript(session_json: &str, show: Show) -> Vec<String> {
-    let mut blocks = Vec::new();
-    for (message, parts) in opencode_messages(session_json) {
-        let meta = read_json(&message).unwrap_or(Value::Null);
-        let role = meta.get("role").and_then(Value::as_str).unwrap_or("?");
-        let said: Vec<String> = parts
-            .iter()
-            .filter_map(|p| read_json(p))
-            .flat_map(|p| texts(&p).into_iter().chain(extras(&p, show)))
-            .filter(|t| !t.trim().is_empty())
-            .collect();
-        if !said.is_empty() {
-            blocks.push(format!("## {role}\n{}", said.join("\n")));
-        }
-    }
-    blocks
-}
-
 /// The transcript as text, one block per message. Works for every format here.
 ///
 /// `at` prints only the record on that line, which is what the picker previews. Otherwise
@@ -986,18 +967,18 @@ pub fn read(
     show: Show,
     role: Option<&str>,
 ) -> String {
-    let blocks: Vec<String> = blocks(path, at, show)
-        .into_iter()
-        .filter(|block| role.is_none_or(|role| block_role(block) == role))
-        .collect();
-    ends(&blocks, head, tail).join("\n\n")
-}
-
-fn block_role(block: &str) -> &str {
-    block
-        .strip_prefix("## ")
-        .and_then(|block| block.split_once('\n'))
-        .map_or("", |(role, _)| role)
+    crate::transcript::read(
+        path,
+        crate::transcript::ReadOptions {
+            head,
+            tail,
+            at,
+            show,
+            role,
+            ..Default::default()
+        },
+    )
+    .expect("cannot read session")
 }
 
 /// Mark the runs an agent started for itself. Name mode learns this while it reads the
@@ -1135,89 +1116,14 @@ fn files_named(raw: &str) -> Vec<String> {
     seen
 }
 
-/// One block per message, in order.
+/// One rendered block per normalized message. -- PI/OpenAI
 fn blocks(path: &str, at: u64, show: Show) -> Vec<String> {
-    if agent_of(path) == "hermes" {
-        return hermes::blocks(path, show);
-    }
-    let stem = Path::new(path)
-        .file_stem()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
-    if stem.starts_with("ses_") {
-        // opencode: a session is a directory of shards
-        return opencode_transcript(path, show);
-    }
-    let mut blocks: Vec<String> = Vec::new();
-    let raw = std::fs::read(path).unwrap_or_default();
-    for (index, line) in String::from_utf8_lossy(&raw).split('\n').enumerate() {
-        let line_no = index as u64 + 1;
-        if at != 0 && line_no != at {
-            continue;
-        }
-        let Some(block) = block(line, at != 0, show) else {
-            continue;
-        };
-        // a resent prompt is filed twice, once cut short, so keep whichever says more
-        match blocks.last() {
-            Some(last) if block.starts_with(last.as_str()) => drop(blocks.pop()),
-            Some(last) if last.starts_with(&block) => continue,
-            _ => {}
-        }
-        blocks.push(block);
-    }
-    if blocks.is_empty() {
-        // gemini keeps every prompt in one JSON array rather than one JSONL record per turn
-        if let Some(Value::Array(entries)) = parse(&String::from_utf8_lossy(&raw)) {
-            for entry in entries {
-                let said: Vec<String> = texts(&entry)
-                    .into_iter()
-                    .filter(|t| !t.trim().is_empty())
-                    .collect();
-                if !said.is_empty() {
-                    blocks.push(format!("## {}\n{}", role_of(&entry), said.join("\n")));
-                }
-            }
-        }
-    }
-    blocks
-}
-
-/// One record as `# role\nwhat was said`; `verbatim` keeps preambles and tool calls too.
-fn block(line: &str, verbatim: bool, show: Show) -> Option<String> {
-    let entry = parse(line)?;
-    // claude files a tool result as a user turn, and echoes the prompt as an isMeta one
-    let result = entry.get("toolUseResult").is_some() && !show.tools;
-    if !verbatim && (result || entry.get("isMeta") == Some(&Value::Bool(true))) {
-        return None;
-    }
-    let calls = extras(&entry, show);
-    let said: Vec<String> = texts(&entry)
-        .into_iter()
-        .filter(|t| !t.trim().is_empty())
-        .filter(|t| verbatim || !is_junk(t))
-        .chain(calls.iter().cloned())
-        .collect();
-    let mut body = said.join("\n");
-    if verbatim && body.is_empty() {
-        // the match landed in a tool call; show the record itself
-        body = cut(
-            &serde_json::to_string_pretty(&entry).unwrap_or_default(),
-            4000,
-        );
-    }
-    // claude files a tool result under the user's role, and codex and pi give the tool
-    // records a role of their own, so anything that is only tool lines is labelled tool
-    let spoke = role_of(&entry);
-    let turn =
-        ["user", "assistant"].contains(&spoke.as_str()) && entry.get("toolUseResult").is_none();
-    let role = if turn { spoke } else { "tool".to_string() };
-    if body.is_empty() || !(verbatim || turn || !calls.is_empty()) {
-        return None;
-    }
-    // level 2, so the export drops under a `# session` heading in whatever report it is pasted into
-    Some(format!("## {role}\n{body}"))
+    crate::transcript::deduplicate(
+        crate::transcript::messages(path, at, show).expect("cannot read session"),
+    )
+    .iter()
+    .map(crate::transcript::Message::markdown)
+    .collect()
 }
 
 /// The first `head` and last `tail` blocks, with a marker for the dropped middle. 0,0 is all.
