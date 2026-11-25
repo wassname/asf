@@ -96,6 +96,84 @@ fn user(id: &str, time: Option<&str>, text: &str) -> Value {
 const ID: &str = "01a10007-446e-7029-9d46-254776d94b86";
 
 #[test]
+fn antigravity_exports_are_discoverable_and_keep_step_numbers() {
+    let home = Home::new();
+    let base = ".gemini/antigravity-cli/conversations";
+    let path = home.write(&format!("{base}/{ID}.trajectory.json"), &[json!({
+        "cascadeId": ID,
+        "steps": [
+            {"type": "CORTEX_STEP_TYPE_USER_INPUT", "userInput": {"userResponse": "review the rust changes"}, "metadata": {"createdAt":"2026-01-01T01:00:00Z"}},
+            {"type": "FUTURE_STEP"},
+            {"type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE", "plannerResponse": {"response": "found the duplicate entry", "thinking": "private reasoning"}, "metadata": {"createdAt":"2026-01-01T01:01:00Z"}}
+        ]
+    })]);
+    home.write(&format!("{base}/{ID}.db"), &[json!({"fake": true})]);
+    let child = "01a10007-446e-7029-9d46-254776d94b87";
+    let child_path = home.write(
+        &format!(".gemini/antigravity/conversations/{child}.trajectory.json"),
+        &[json!({
+            "cascadeId": child, "agyReader": {"parentCascadeId": ID}
+        })],
+    );
+    let path = path.to_str().unwrap();
+    assert_eq!(
+        stdout(&home.run(&["-a", "agy", "--paths", "rust changes"])).trim(),
+        path
+    );
+    let all = stdout(&home.run(&["-a", "agy", "--paths", "--sub"]));
+    assert!(all.lines().any(|line| line == child_path.to_str().unwrap()));
+    assert_eq!(
+        stdout(&home.run(&["-a", "agy", "-c", "--paths", "duplicate entry"])).trim(),
+        path
+    );
+    let rows = records(&home.run(&["-a", "agy", "-r", &ID[..8], "--jsonl"]));
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[1]["source"]["index"], 3);
+    assert_eq!(rows[1]["timestamp"], "2026-01-01T01:01:00Z");
+    assert_eq!(rows[1]["text"], "found the duplicate entry");
+    assert!(stdout(&home.run(&["-p", path, "--line", "3"])).contains("## assistant #3"));
+    assert_eq!(
+        stdout(&home.run(&["-u", path])).trim(),
+        format!("agy --conversation {ID}")
+    );
+}
+
+#[test]
+fn copilot_search_ignores_bookkeeping_and_preview_reports_read_errors() {
+    let home = Home::new();
+    let label = format!(".copilot/session-state/{ID}");
+    home.write(
+        &format!("{label}/metadata.json"),
+        &[json!({"text":"copilot needle"})],
+    );
+    let found = home.run(&["-a", "copilot", "-c", "--paths", "copilot needle"]);
+    assert!(stdout(&found).trim().is_empty());
+    assert!(found.stderr.is_empty());
+    let events = home.write(
+        &format!("{label}/events.jsonl"),
+        &[json!({"type":"user.message", "data":{"content":"copilot needle"}})],
+    );
+    assert_eq!(
+        stdout(&home.run(&["-a", "copilot", "-c", "--paths", "copilot needle"])).trim(),
+        events.to_str().unwrap()
+    );
+    use std::io::Write;
+    fs::OpenOptions::new()
+        .append(true)
+        .open(&events)
+        .unwrap()
+        .write_all(&[0xff, b'\n'])
+        .unwrap();
+    let preview = home.run(&["-p", events.to_str().unwrap()]);
+    assert!(!preview.status.success());
+    let error = String::from_utf8_lossy(&preview.stderr);
+    assert!(
+        error.contains("events.jsonl:2:") && error.contains("UTF-8") && !error.contains("panicked"),
+        "{error}"
+    );
+}
+
+#[test]
 fn fixture_formats_share_a_jsonl_schema_with_traceable_sources() {
     let home = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/home"));
     for agent in [
@@ -205,6 +283,13 @@ fn date_and_role_filters_precede_head_and_tail_without_jsonl_markers() {
     let markdown = stdout(&home.run(&args));
     assert!(markdown.contains("1 messages omitted"), "{markdown}");
     assert!(!markdown.contains("assistant answer"));
+    assert!(markdown.contains("## user #3\nfirst instruction"));
+    assert!(markdown.contains("## user #6\nlast instruction"));
+    let around = stdout(&home.run(&["-r", path.to_str().unwrap(), "--around", "5"]));
+    assert_eq!(
+        around.trim(),
+        "## assistant #4\nassistant answer\n\n## user #5\nmiddle instruction\n\n## user #6\nlast instruction"
+    );
 }
 
 #[test]
@@ -315,7 +400,7 @@ fn jsonl_preserves_distinct_records_even_when_text_is_repeated_or_shortened() {
         "--since",
         "2026-10-24T00:00:00Z",
     ]));
-    assert_eq!(markdown.trim(), "## user\nyes");
+    assert_eq!(markdown.trim(), "## user #3\nyes");
 }
 
 #[test]

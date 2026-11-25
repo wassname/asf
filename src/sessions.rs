@@ -1,9 +1,9 @@
 //! Where the sessions live, how each agent names one, and how to read one back.
 
-use crate::hermes;
 use crate::metadata::MetadataIndex;
 use crate::record::*;
 use crate::scan::{self, Hits, JSONISH, Scan};
+use crate::{agy, hermes};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
@@ -11,8 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Session stores; name metadata is read by name_sessions. -- PI/OpenAI
-/// hermes is last and is a sqlite file, not a directory: src/hermes.rs reads it instead.
-pub const SOURCES: [(&str, &str); 7] = [
+pub const SOURCES: [(&str, &str); 8] = [
     ("claude", ".claude/projects"),
     ("codex", ".codex/sessions"),
     ("pi", ".pi/agent/sessions"),
@@ -20,17 +19,19 @@ pub const SOURCES: [(&str, &str); 7] = [
     ("opencode", ".local/share/opencode/storage"),
     ("copilot", ".copilot/session-state"),
     ("hermes", ".hermes/state.db"),
+    ("agy", agy::CLI),
 ];
 
 /// how to reopen a session, by agent. gemini is absent: its --resume takes `latest` or a
 /// list index, never an id.
-const RESUME: [(&str, &str); 6] = [
+const RESUME: [(&str, &str); 7] = [
     ("claude", "claude --resume {sid}"),
     ("codex", "codex resume {sid}"),
     ("pi", "pi --session {sid}"),
     ("opencode", "opencode --session {sid}"),
     ("copilot", "copilot --resume={sid}"),
     ("hermes", "hermes --resume {sid}"),
+    ("agy", "agy --conversation {sid}"),
 ];
 
 /// the three records claude writes for a session's name; TITLE_FIELDS is their order of rank
@@ -147,6 +148,13 @@ impl Rows {
 
 pub fn agent_of(path: &str) -> String {
     let home = home();
+    let file = Path::new(path);
+    if agy::id(file).is_some()
+        || file.starts_with(home.join(agy::CLI))
+        || file.starts_with(home.join(agy::IDE))
+    {
+        return "agy".to_string();
+    }
     for (agent, tail) in SOURCES {
         if path.starts_with(&home.join(tail).to_string_lossy().to_string()) {
             return agent.to_string();
@@ -180,6 +188,7 @@ pub fn session_id(path: &str, agent: &str) -> String {
         "opencode" => stem,
         // a hermes session is a row in a database, and its path is <db>#<id>
         "hermes" => hermes::id_of(path),
+        "agy" => agy::id(p).unwrap_or(&stem).to_string(),
         // the id is inside the record: a pi filename truncates it at an underscore, and for
         // 8 of 1216 sessions here the filename uuid is not the one pi answers to
         "pi" => first_record(path).map_or(stem, |e| find_value(&e, "id")),
@@ -202,7 +211,7 @@ pub fn resolve_id(query: &str, agent: Option<&str>, sub: bool) -> Vec<String> {
     let mut matches: Vec<(String, String)> = Vec::new();
     let mut pi_paths = Vec::new();
     for (source, _) in SOURCES {
-        if source == "hermes" || agent.is_some_and(|a| a != source) {
+        if ["hermes", "agy"].contains(&source) || agent.is_some_and(|a| a != source) {
             continue;
         }
         let root = if source == "opencode" {
@@ -271,6 +280,16 @@ pub fn resolve_id(query: &str, agent: Option<&str>, sub: bool) -> Vec<String> {
                 .map(|row| (hermes::id_of(&row.path), row.path)),
         );
     }
+    if agent.is_none_or(|a| a == "agy") {
+        matches.extend(agy::paths().into_iter().filter_map(|path| {
+            let id = agy::id(&path)?;
+            if !id.starts_with(query) {
+                return None;
+            }
+            let row = index.refresh(&path, "agy").into_iter().next()?;
+            (sub || !row.sub).then_some((row.id, row.path))
+        }));
+    }
     let exact = matches.iter().any(|(id, _)| id == query);
     let mut paths: Vec<String> = matches
         .into_iter()
@@ -313,6 +332,12 @@ pub fn resume_command(row: &Row) -> String {
     } else {
         row.id.clone()
     };
+    if row.agent == "agy" && (!UUID.is_match(&id) || id.len() != 36) {
+        return format!(
+            "# Antigravity export has no valid conversation ID: {}",
+            row.path
+        );
+    }
     let cmd = template.replace("{sid}", &id);
     if row.cwd.is_empty() {
         return cmd;
@@ -322,7 +347,7 @@ pub fn resume_command(row: &Row) -> String {
         // directory, so for those this command is the proof that the session is stranded
         return format!("# the directory it ran in is gone: {}\n{cmd}", row.cwd);
     }
-    format!("cd '{}' && {cmd}", row.cwd)
+    format!("cd '{}' && {cmd}", row.cwd.replace('\'', "'\\''"))
 }
 
 /// The resume command for one transcript path, read fresh. The picker needs this: after a
@@ -338,6 +363,12 @@ pub fn resume_for_path(hit: &str) -> String {
             );
         };
         return resume_command(&row);
+    }
+    if agent == "agy" && Path::new(&path).starts_with(home().join(agy::IDE)) {
+        return format!(
+            "# Open conversation {} in the Antigravity IDE",
+            session_id(&path, &agent)
+        );
     }
     let mut index = MetadataIndex::load();
     let row = index
@@ -465,6 +496,24 @@ where
         )
     };
     for (agent, paths) in stores {
+        if agent == "agy" {
+            for path in paths {
+                let path = path.to_string_lossy();
+                match agy::session(&path) {
+                    Ok(row) => add(
+                        &path,
+                        Found {
+                            title: row.title,
+                            line: row.line,
+                            sub: row.sub,
+                            ..Default::default()
+                        },
+                    ),
+                    Err(error) => eprintln!("asf: {error}"),
+                }
+            }
+            continue;
+        }
         let found = NAME_PATTERNS.iter().find(|(a, _, _)| a == agent);
         if let Some((_, _, header)) = found.filter(|(_, _, h)| !h.is_empty()) {
             for (path, hits) in names(header, paths, 1) {
@@ -687,7 +736,9 @@ pub fn stream_names(
     let mut cache = MetadataIndex::load();
     let mut files: Vec<(f64, Candidate)> = SOURCES
         .iter()
-        .filter(|(source, _)| *source != "hermes" && agent.is_none_or(|a| a == *source))
+        .filter(|(source, _)| {
+            !["hermes", "agy"].contains(source) && agent.is_none_or(|a| a == *source)
+        })
         .flat_map(|(source, _)| {
             let root = if *source == "opencode" {
                 store(source).join("session")
@@ -725,6 +776,14 @@ pub fn stream_names(
                 .into_iter()
                 .map(|row| (row.mtime, Candidate::Hermes(row))),
         );
+    }
+    if agent.is_none_or(|a| a == "agy") {
+        files.extend(agy::paths().into_iter().map(|path| {
+            (
+                mtime(&path.to_string_lossy()),
+                Candidate::File("agy".into(), path),
+            )
+        }));
     }
     files.sort_by(|a, b| b.0.total_cmp(&a.0));
     let mut indexed_rows = Vec::new();
@@ -796,10 +855,12 @@ fn opencode_sessions() -> HashMap<String, String> {
 }
 
 /// Search every store. One row per session, at its first hit.
-pub fn search_content(query: &str, regex: bool) -> Vec<Row> {
+pub fn search_content(query: &str, regex: bool, agent: Option<&str>) -> Vec<Row> {
     let roots: Vec<PathBuf> = SOURCES
         .iter()
-        .filter(|(a, _)| *a != "hermes")
+        .filter(|(a, _)| {
+            !["hermes", "agy", "copilot"].contains(a) && agent.is_none_or(|source| source == *a)
+        })
         .map(|(a, _)| store(a))
         .collect();
     let scan = |paths: &[PathBuf], max_count: usize| -> Hits {
@@ -815,6 +876,13 @@ pub fn search_content(query: &str, regex: bool) -> Vec<Row> {
         )
     };
     let mut hits = scan(&roots, 1);
+    if agent.is_none_or(|a| a == "copilot") {
+        let events: Vec<_> = scan::session_files(&store("copilot"), 2)
+            .into_iter()
+            .filter(|p| p.ends_with("events.jsonl"))
+            .collect();
+        hits.extend(scan(&events, 1));
+    }
 
     // where the only hit is harness-injected text, look deeper in those files alone
     let noisy: Vec<PathBuf> = hits
@@ -875,7 +943,12 @@ pub fn search_content(query: &str, regex: bool) -> Vec<Row> {
         regex::escape(query)
     };
     if let Ok(pattern) = regex::Regex::new(&format!("(?i){wanted}")) {
-        rows.extend(hermes::search_content(&pattern, query));
+        if agent.is_none_or(|a| a == "hermes") {
+            rows.extend(hermes::search_content(&pattern, query));
+        }
+        if agent.is_none_or(|a| a == "agy") {
+            rows.extend(agy::search_content(&pattern, query));
+        }
     }
     rows
 }
@@ -955,37 +1028,11 @@ pub(crate) fn opencode_messages(session_json: &str) -> Vec<(PathBuf, Vec<PathBuf
         .collect()
 }
 
-/// The transcript as text, one block per message. Works for every format here.
-///
-/// `at` prints only the record on that line, which is what the picker previews. Otherwise
-/// only the conversation: tool calls, their results and the harness preambles are dropped.
-pub fn read(
-    path: &str,
-    head: usize,
-    tail: usize,
-    at: u64,
-    show: Show,
-    role: Option<&str>,
-) -> String {
-    crate::transcript::read(
-        path,
-        crate::transcript::ReadOptions {
-            head,
-            tail,
-            at,
-            show,
-            role,
-            ..Default::default()
-        },
-    )
-    .expect("cannot read session")
-}
-
 /// Mark the runs an agent started for itself. Name mode learns this while it reads the
 /// headers; content mode never reads them, so it asks here, by the same rules.
 pub fn mark_subagents(rows: &mut [Row]) {
     let mut by_agent: Vec<(String, Vec<PathBuf>)> = Vec::new();
-    for row in rows.iter() {
+    for row in rows.iter().filter(|row| row.agent != "agy") {
         match by_agent.iter_mut().find(|(a, _)| *a == row.agent) {
             Some((_, paths)) => paths.push(PathBuf::from(&row.path)),
             None => by_agent.push((row.agent.clone(), vec![PathBuf::from(&row.path)])),
@@ -1003,7 +1050,7 @@ pub fn mark_subagents(rows: &mut [Row]) {
 }
 
 /// Where it ran, the files it named, the record that matched, then its first and last words.
-pub fn preview(path: &str, at: u64) -> String {
+pub fn preview(path: &str, at: u64) -> Result<String, String> {
     let agent = agent_of(path);
     let mut cwd = String::new();
     let mut title = String::new();
@@ -1059,11 +1106,21 @@ pub fn preview(path: &str, at: u64) -> String {
         "file",
         path.replace(&home().to_string_lossy().to_string(), "~"),
     ));
-    let said = blocks(path, 0, Show::default());
+    let said: Vec<_> =
+        crate::transcript::deduplicate(crate::transcript::messages(path, 0, Show::default())?)
+            .iter()
+            .map(crate::transcript::Message::markdown)
+            .collect();
     let matched = if at == 0 {
         String::new()
     } else {
-        read(path, 0, 0, at, Show::default(), None)
+        crate::transcript::read(
+            path,
+            crate::transcript::ReadOptions {
+                at,
+                ..Default::default()
+            },
+        )?
     };
     // in name mode the match IS the first message, and printing it twice wastes the pane
     if !matched.is_empty() && said.first() != Some(&matched) {
@@ -1072,7 +1129,7 @@ pub fn preview(path: &str, at: u64) -> String {
     }
     out.push(String::new());
     out.extend(ends(&said, 1, 2).iter().map(|block| cut(block, 220)));
-    out.join("\n")
+    Ok(out.join("\n"))
 }
 
 /// The whole session as text, whatever it is split over.
@@ -1114,16 +1171,6 @@ fn files_named(raw: &str) -> Vec<String> {
     }
     seen.truncate(12);
     seen
-}
-
-/// One rendered block per normalized message. -- PI/OpenAI
-fn blocks(path: &str, at: u64, show: Show) -> Vec<String> {
-    crate::transcript::deduplicate(
-        crate::transcript::messages(path, at, show).expect("cannot read session"),
-    )
-    .iter()
-    .map(crate::transcript::Message::markdown)
-    .collect()
 }
 
 /// The first `head` and last `tail` blocks, with a marker for the dropped middle. 0,0 is all.

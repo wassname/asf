@@ -378,7 +378,9 @@ fn only_role(text: &str, role: &str) {
         .collect();
     assert!(!headings.is_empty(), "no headings in {text}");
     assert!(
-        headings.iter().all(|line| *line == format!("## {role}")),
+        headings.iter().all(|line| line
+            .strip_prefix(&format!("## {role} #"))
+            .is_some_and(|n| n.parse::<u64>().is_ok_and(|n| n > 0))),
         "{text}"
     );
 }

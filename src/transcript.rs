@@ -57,8 +57,15 @@ impl Message {
         }
     }
 
+    fn number(&self) -> u64 {
+        self.source
+            .line
+            .or(self.source.index.map(|n| n as u64))
+            .unwrap_or_else(|| self.source.record_id.as_deref().unwrap().parse().unwrap())
+    }
+
     pub fn markdown(&self) -> String {
-        format!("## {}\n{}", self.role, self.text)
+        format!("## {} #{}\n{}", self.role, self.number(), self.text)
     }
 }
 
@@ -181,13 +188,16 @@ fn array_messages(entries: &[Value], session: &Row, show: Show) -> Vec<Message> 
 }
 
 pub fn messages(path: &str, at: u64, show: Show) -> Result<Vec<Message>, String> {
+    if sessions::agent_of(path) == "agy" {
+        return crate::agy::messages(path, at, show);
+    }
     let session = context(path);
     if session.agent == "hermes" {
         return Ok(crate::hermes::messages(&session, show));
     }
     if session.agent == "opencode" {
         let mut messages = Vec::new();
-        for (file, parts) in sessions::opencode_messages(path) {
+        for (index, (file, parts)) in sessions::opencode_messages(path).into_iter().enumerate() {
             let entry = sessions::read_json(&file)
                 .ok_or_else(|| format!("cannot read OpenCode message {}", file.display()))?;
             let said: Vec<String> = parts
@@ -205,7 +215,7 @@ pub fn messages(path: &str, at: u64, show: Show) -> Result<Vec<Message>, String>
                     Source {
                         path: file.to_string_lossy().into_owned(),
                         line: None,
-                        index: None,
+                        index: Some(index + 1),
                         record_id: record_id(&entry, "opencode"),
                         parts: parts
                             .iter()
@@ -291,6 +301,7 @@ pub struct ReadOptions<'a> {
     pub head: usize,
     pub tail: usize,
     pub at: u64,
+    pub around: Option<u64>,
     pub show: Show,
     pub role: Option<&'a str>,
     pub since: Option<Timestamp>,
@@ -299,6 +310,22 @@ pub struct ReadOptions<'a> {
 }
 
 pub fn read(path: &str, options: ReadOptions<'_>) -> Result<String, String> {
+    if let Some(number) = options.around {
+        let messages = messages(path, 0, options.show)?;
+        let center = messages
+            .iter()
+            .position(|m| m.number() == number)
+            .ok_or_else(|| {
+                format!("{path}: no visible message #{number} (try --tools or --think if needed)")
+            })?;
+        return Ok(
+            messages[center.saturating_sub(1)..(center + 2).min(messages.len())]
+                .iter()
+                .map(Message::markdown)
+                .collect::<Vec<_>>()
+                .join("\n\n"),
+        );
+    }
     let mut unknown = 0;
     let dated = options.since.is_some() || options.until.is_some();
     let messages: Vec<Message> = messages(path, options.at, options.show)?

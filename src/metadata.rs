@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, Metadata};
 use std::hash::{Hash, Hasher};
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
-use std::os::unix::fs::MetadataExt;
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -257,7 +257,13 @@ impl MetadataIndex {
 
     pub fn refresh(&mut self, path: &Path, agent: &str) -> Vec<Row> {
         let key = path.to_string_lossy().into_owned();
-        let stamp = Stamp::new(&path.metadata().unwrap());
+        let stamp = match path.metadata() {
+            Ok(metadata) => Stamp::new(&metadata),
+            Err(error) => {
+                eprintln!("asf: {}: {error}", path.display());
+                return Vec::new();
+            }
+        };
         if let Some(entry) = self.entries.get(&key)
             && entry.stamp == stamp
         {
@@ -267,10 +273,17 @@ impl MetadataIndex {
                 Vec::new()
             };
         }
-        let mut file = File::open(path).unwrap();
+        let mut file = match File::open(path) {
+            Ok(file) => file,
+            Err(error) => {
+                eprintln!("asf: {}: {error}", path.display());
+                return Vec::new();
+            }
+        };
+        let standalone = ["gemini", "opencode", "agy"].contains(&agent);
         let mut entry = match self.entries.get(&key) {
             Some(entry)
-                if !["gemini", "opencode"].contains(&agent)
+                if !standalone
                     && entry.stamp.file == stamp.file
                     && stamp.size > entry.stamp.size
                     && anchors(&mut file, entry.offset) == entry.anchors =>
@@ -280,7 +293,7 @@ impl MetadataIndex {
             _ => Entry::new(path, agent, stamp.clone()),
         };
         entry.stamp = stamp;
-        if ["gemini", "opencode"].contains(&agent) {
+        if standalone {
             if let Some(row) = crate::sessions::standalone_metadata(path, agent) {
                 entry.row = row;
                 entry.row.id = session_id(&key, agent);
@@ -326,7 +339,11 @@ impl MetadataIndex {
 
     pub fn search(&mut self, rows: Vec<Row>, query: &str, regex: bool) -> Vec<Row> {
         let directory = self.root.join("search");
-        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&directory)
+            .unwrap();
         let mut keys = HashMap::new();
         for row in &rows {
             let name = format!("{:016x}.txt", digest(row.path.as_bytes()));
@@ -342,7 +359,7 @@ impl MetadataIndex {
             let old = std::fs::read_to_string(&path).unwrap_or_default();
             if old != text {
                 let temporary = path.with_extension(format!("{}.tmp", std::process::id()));
-                std::fs::write(&temporary, text).unwrap();
+                write_private(&temporary, text.as_bytes()).unwrap();
                 std::fs::rename(temporary, path).unwrap();
             }
         }
@@ -409,11 +426,23 @@ impl MetadataIndex {
     }
 
     fn save(&self) -> std::io::Result<()> {
-        std::fs::create_dir_all(&self.root)?;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&self.root)?;
         let temporary = self.root.join(format!("index.{}.tmp", std::process::id()));
-        std::fs::write(&temporary, serde_json::to_vec(&self.entries)?)?;
+        write_private(&temporary, &serde_json::to_vec(&self.entries)?)?;
         std::fs::rename(temporary, self.root.join("index.json"))
     }
+}
+
+fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)?
+        .write_all(bytes)
 }
 
 impl Drop for MetadataIndex {

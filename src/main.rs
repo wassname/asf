@@ -8,6 +8,7 @@
 //!     asf --paths -c steer     just the transcript paths, for piping
 //!
 
+mod agy;
 mod hermes;
 mod metadata;
 mod pick;
@@ -74,7 +75,8 @@ Pi sessions with non-UUID IDs are treated as subagents; renaming a session does 
 Read your current Pi transcript when you need exact earlier wording, decisions, or context:
 `asf -r \"$PI_INTERCOM_SESSION_ID\" --tail 40`.
 
--r/--read exports the session as markdown, `## role` a message, the conversation only. --tools
+-r/--read exports the session as Markdown with headings like `## user #42`.
+`asf -r SESSION --around 42` reads that message and its neighbors. --tools
 and --think put the tool calls and the reasoning back, a line each; --head and --tail cut it.
 --role user, assistant, or tool filters records before --head and --tail. --role tool enables
 --tools: it selects tool records, while --tools also retains tool details in user and assistant
@@ -156,6 +158,9 @@ struct Args {
     /// with --read or --preview, the record on that line
     #[arg(long, default_value_t = 0)]
     line: u64,
+    /// show message N and the visible message before and after it
+    #[arg(long, value_name = "N", requires = "read", conflicts_with_all = ["role", "since", "until", "head", "tail", "line", "jsonl"], value_parser = clap::value_parser!(u64).range(1..))]
+    around: Option<u64>,
 }
 
 fn parse_time(value: &str) -> Result<jiff::Timestamp, String> {
@@ -191,9 +196,6 @@ fn path_matches_cwd(path: &str, cwd: Option<&Path>) -> bool {
 
 fn picker_filters(args: &Args) -> String {
     let mut filters = String::new();
-    if let Some(agent) = &args.agent {
-        filters.push_str(&format!(" -a {agent}"));
-    }
     if args.sub {
         filters.push_str(" --sub");
     }
@@ -372,6 +374,12 @@ fn one(args: &Args, path: &str) -> ! {
         eprintln!("asf: session does not match --cwd: {path}");
         std::process::exit(1);
     }
+    if sessions::agent_of(path) == "agy" && agy::id(Path::new(path)).is_none() {
+        eprintln!(
+            "asf: expected an Antigravity <id>.trajectory.json export, not {path}; see the Antigravity section in README.md"
+        );
+        std::process::exit(1);
+    }
     let out = if args.read.is_some() {
         let show = record::Show {
             tools: args.tools || matches!(args.role, Some(Role::Tool)),
@@ -383,6 +391,7 @@ fn one(args: &Args, path: &str) -> ! {
                 head: args.head,
                 tail: args.tail,
                 at: args.line,
+                around: args.around,
                 show,
                 role: args.role.map(Role::as_str),
                 since: args.since,
@@ -395,7 +404,10 @@ fn one(args: &Args, path: &str) -> ! {
             std::process::exit(1);
         })
     } else if args.preview.is_some() {
-        sessions::preview(path, args.line)
+        sessions::preview(path, args.line).unwrap_or_else(|error| {
+            eprintln!("asf: {error}");
+            std::process::exit(1);
+        })
     } else {
         sessions::resume_for_path(path)
     };
@@ -536,14 +548,19 @@ fn main() {
             );
         });
         let filters = picker_filters(&args);
-        pick::pick(Box::new(BufReader::new(reader)), &filters, &query);
+        pick::pick(
+            Box::new(BufReader::new(reader)),
+            &filters,
+            &query,
+            args.agent.as_deref(),
+        );
         stop.store(true, Ordering::Relaxed);
         return;
     }
     let mut name_search_stopped = false;
     let mut exact_name = false;
     let mut rows = if args.content && !query.is_empty() {
-        sessions::search_content(&query, args.regex)
+        sessions::search_content(&query, args.regex, args.agent.as_deref())
     } else if !args.regex && sessions::looks_like_id(&query) {
         sessions::resolve_id(&query, args.agent.as_deref(), args.sub)
             .into_iter()
@@ -631,7 +648,12 @@ fn main() {
         sessions::hydrate(&mut rows, &query);
         // the picker reruns me for its transcript search, so it needs the same filters back
         let filters = picker_filters(&args);
-        pick::pick(Box::new(Cursor::new(rows_tsv(&rows))), &filters, &query);
+        pick::pick(
+            Box::new(Cursor::new(rows_tsv(&rows))),
+            &filters,
+            &query,
+            args.agent.as_deref(),
+        );
     } else if args.rows {
         rows.truncate(args.limit);
         sessions::hydrate(&mut rows, &query);
