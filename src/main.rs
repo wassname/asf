@@ -553,6 +553,7 @@ fn main() {
             &filters,
             &query,
             args.agent.as_deref(),
+            false,
         );
         stop.store(true, Ordering::Relaxed);
         return;
@@ -653,6 +654,7 @@ fn main() {
             &filters,
             &query,
             args.agent.as_deref(),
+            args.content,
         );
     } else if args.rows {
         rows.truncate(args.limit);

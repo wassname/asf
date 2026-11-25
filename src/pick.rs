@@ -1,10 +1,10 @@
-//! skim ranks loaded names; ctrl-q switches to a command that rescans every transcript.
+//! Skim picker for sessions and agent filters. -- PI/OpenAI
 
 use crate::sessions::{SOURCES, resume_for_path, session_of};
 use crate::transcript::{self, ReadOptions};
 use skim::prelude::*;
 use skim::reader::CommandCollector;
-use std::io::BufRead;
+use std::io::{BufRead, Cursor};
 use std::process::{Command, Stdio};
 
 /// Rows the picker holds. Every session fits: fuzzy matching a loaded row is what makes the
@@ -50,7 +50,43 @@ impl CommandCollector for Collector {
     }
 }
 
-pub fn pick(source: Box<dyn BufRead + Send>, filters: &str, query: &str, agent: Option<&str>) {
+const ALL: &str = "All agents";
+
+fn choose_agent(current: Option<&str>) -> Option<&str> {
+    let choices = std::iter::once(ALL)
+        .chain(SOURCES.iter().map(|&(agent, _)| agent))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let options = SkimOptions {
+        layout: "reverse".into(),
+        prompt: "agent> ".into(),
+        header: Some(format!(
+            "Filter agent (current: {})\nType or use Up/Down | Enter apply | Esc cancel",
+            current.unwrap_or(ALL)
+        )),
+        ..Default::default()
+    };
+    let items =
+        SkimItemReader::new(SkimItemReaderOption::default()).of_bufread(Cursor::new(choices));
+    let Some(out) = Skim::run_with(&options, Some(items)).filter(|out| !out.is_abort) else {
+        return current;
+    };
+    let Some(chosen) = out.selected_items.first() else {
+        return current;
+    };
+    SOURCES
+        .iter()
+        .map(|&(agent, _)| agent)
+        .find(|&agent| agent == chosen.output())
+}
+
+pub fn pick(
+    source: Box<dyn BufRead + Send>,
+    filters: &str,
+    query: &str,
+    mut agent: Option<&str>,
+    mut content: bool,
+) {
     let bat = Command::new("bat")
         .arg("--version")
         .stdout(Stdio::null())
@@ -59,35 +95,6 @@ pub fn pick(source: Box<dyn BufRead + Send>, filters: &str, query: &str, agent: 
         .is_ok();
     let me = std::env::current_exe().expect("cannot find my own path");
     let me = shell_arg(&me.to_string_lossy());
-    let search_agent = agent.map_or_else(String::new, |a| format!(" -a {a}"));
-    let mut agents = Vec::new();
-    let mut legend = Vec::new();
-    for (n, (agent, _)) in SOURCES.iter().enumerate() {
-        agents.push(format!(
-            "f{}:reload({me} --rows{filters} -a {agent} -n {ROWS})",
-            n + 1
-        ));
-        legend.push(format!("F{}  {agent}", n + 1));
-    }
-    agents.push(format!(
-        "f{}:reload({me} --rows{filters} -n {ROWS})",
-        SOURCES.len() + 1
-    ));
-    legend.push(format!("F{}  All agents", SOURCES.len() + 1));
-    let filters_list = legend
-        .chunks(3)
-        .map(|row| {
-            format!(
-                "  {}",
-                row.iter()
-                    .map(|item| format!("{item:14}"))
-                    .collect::<Vec<_>>()
-                    .join(" | ")
-                    .trim_end()
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
     let color = !std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty());
     let (heading, reset) = if color {
         ("\x1b[1;36m", "\x1b[0m")
@@ -105,14 +112,18 @@ pub fn pick(source: Box<dyn BufRead + Send>, filters: &str, query: &str, agent: 
   Ctrl-Q          Switch name / transcript search
 
 {heading}Agent filters{reset}
-{filters_list}
+  Ctrl-F          Choose an agent or All agents
 
 {heading}Navigation{reset}
   Up/Down         Select a session; PgUp/PgDn move by page
   Shift-Up/Down   Scroll the transcript preview
   Esc             Close without printing
 
-Press Enter to return to the picker."
+Press q to return to the picker."
+    );
+    let help_command = format!(
+        "exec </dev/tty >/dev/tty; old=$(stty -g) || exit; trap 'stty \"$old\"' 0; trap 'exit 1' HUP INT TERM; stty -icanon -echo min 1 time 0 || exit; printf '\\n%s\\n' {}; while key=$(dd bs=1 count=1 2>/dev/null); do case \"$key\" in q|'') break;; esac; done",
+        shell_arg(&help)
     );
 
     let reader = SkimItemReader::new(
@@ -121,17 +132,19 @@ Press Enter to return to the picker."
             .delimiter("\t")
             .with_nth(["1"].into_iter()),
     );
-    let items = reader.of_bufread(source);
+    let mut items = Some(reader.of_bufread(source));
     let collector = Rc::new(RefCell::new(Collector {
         reader,
-        search: format!("{me} --rows{filters}{search_agent} -n {ROWS} -c --"),
+        search: String::new(),
     }));
 
-    let options = SkimOptions {
+    let mut options = SkimOptions {
         delimiter: "\t".to_string(),
         no_multi: true,
         ansi: true,
-        expect: vec!["alt-p".to_string(), "alt-m".to_string()],
+        expect: ["alt-p", "alt-m", "ctrl-f", "ctrl-q"]
+            .map(str::to_string)
+            .to_vec(),
         // default layout draws the list bottom-up, where page-down is a no-op at the newest row
         layout: "reverse".to_string(),
         // rows arrive newest first, and that beats a fuzzy score: you are usually after a
@@ -139,10 +152,6 @@ Press Enter to return to the picker."
         tiebreak: vec![RankCriteria::Index],
         // substring, like the command line. Scattered fuzzy hits turned "intercom" into 42 rows
         exact: true,
-        // ctrl-q (skim's own toggle-interactive) swaps the query for this command
-        cmd: Some(format!("{SEARCH}{{}}")),
-        // ctrl-q then carries on from the name search instead of starting empty
-        cmd_query: Some(query.to_string()),
         prompt: "name> ".to_string(),
         cmd_prompt: "transcript> ".to_string(),
         preview: Some(if bat {
@@ -153,30 +162,43 @@ Press Enter to return to the picker."
             format!("{me} --preview {{2}} --line {{3}}")
         }),
         preview_window: "down:65%:wrap".to_string(),
-        bind: [
-            agents,
-            vec![format!(
-                "?:execute[printf '\\n%s\\n' {} >/dev/tty; IFS= read -r answer </dev/tty]",
-                shell_arg(&help)
-            )],
-        ]
-        .concat(),
-        header: Some(format!(
-            "Output: Enter print resume command | Alt-P print path | Alt-M export Markdown\nSearch: Ctrl-Q switch name/transcript | F1-F{} filter agent (F{} all)\nNavigation: Up/Down select | Shift-Up/Down scroll preview | Esc close | ? help\n{}",
-            SOURCES.len(),
-            SOURCES.len() + 1,
-            header_row()
-        )),
+        bind: vec![format!("?:execute[sh -c {}]", shell_arg(&help_command))],
         cmd_collector: collector.clone(),
         ..Default::default()
     };
 
-    let Some(out) = Skim::run_with(&options, Some(items)) else {
-        return;
+    let mut query = query.to_owned();
+    let out = loop {
+        let agent_arg = agent.map_or_else(String::new, |name| format!(" -a {}", shell_arg(name)));
+        let rows = format!("{me} --rows{filters}{agent_arg} -n {ROWS}");
+        collector.borrow_mut().search = format!("{me} --rows{filters}{agent_arg} -n {ROWS} -c --");
+        options.interactive = content;
+        options.cmd = Some(if content {
+            format!("{SEARCH}{{}}")
+        } else {
+            rows
+        });
+        options.query = (!content).then(|| query.clone());
+        options.cmd_query = content.then(|| query.clone());
+        options.header = Some(format!(
+            "Output: Enter print resume command | Alt-P print path | Alt-M export Markdown\nSearch: Ctrl-Q switch mode | Ctrl-F filter agent ({})\nNavigation: Up/Down select | Shift-Up/Down scroll preview | Esc close | ? help\n{}",
+            agent.unwrap_or(ALL),
+            header_row()
+        ));
+        let Some(out) = Skim::run_with(&options, items.take()).filter(|out| !out.is_abort) else {
+            return;
+        };
+        query = if content {
+            out.cmd.clone()
+        } else {
+            out.query.clone()
+        };
+        match out.final_key {
+            Key::Ctrl('f') => agent = choose_agent(agent),
+            Key::Ctrl('q') => content = !content,
+            _ => break out,
+        }
     };
-    if out.is_abort {
-        return;
-    }
     let Some(chosen) = out.selected_items.first() else {
         return;
     };
