@@ -364,12 +364,15 @@ fn stream_rows(
 /// Whichever of --read/--preview/--resume was asked for, against one transcript.
 fn one(args: &Args, path: &str) -> ! {
     let absolute;
-    let path = if path.contains('#') {
+    let path = if sessions::agent_of(path) == "hermes" && path.contains('#') {
         path
     } else {
         absolute = std::path::absolute(path).expect("cannot resolve session path");
         absolute.to_str().expect("session path is not UTF-8")
     };
+    let session = sessions::session_of(path);
+    let at = if session == path { args.line } else { 0 };
+    let path = session.as_str();
     if !path_matches_cwd(path, args.cwd.as_deref()) {
         eprintln!("asf: session does not match --cwd: {path}");
         std::process::exit(1);
@@ -390,7 +393,7 @@ fn one(args: &Args, path: &str) -> ! {
             transcript::ReadOptions {
                 head: args.head,
                 tail: args.tail,
-                at: args.line,
+                at,
                 around: args.around,
                 show,
                 role: args.role.map(Role::as_str),
@@ -404,7 +407,7 @@ fn one(args: &Args, path: &str) -> ! {
             std::process::exit(1);
         })
     } else if args.preview.is_some() {
-        sessions::preview(path, args.line).unwrap_or_else(|error| {
+        sessions::preview(path, at).unwrap_or_else(|error| {
             eprintln!("asf: {error}");
             std::process::exit(1);
         })

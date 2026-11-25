@@ -220,7 +220,7 @@ Press q to return to the picker."
         return;
     }
     if out.final_key == Key::Alt('p') {
-        println!("{}", fields[1]);
+        println!("{}", session_of(&fields[1]));
         return;
     }
     // Alt-M writes the selected transcript to stdout for redirection.

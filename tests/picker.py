@@ -19,7 +19,7 @@ ID = "38ca76d1-93ba-427e-9552-03a389428f0e"
 
 
 def verify(tmp):
-    home = tmp / "home"
+    home = tmp / "fixture's home"
     shutil.copytree(ROOT / "tests/fixtures/home", home, ignore=shutil.ignore_patterns(".cache"))
     native = home / ".gemini/antigravity-cli/conversations" / f"{ID}.db"
     native.parent.mkdir(parents=True)
@@ -43,13 +43,21 @@ def verify(tmp):
     output = tmp / "stdout"
     run = 0
 
-    def open_picker(*args):
+    def open_picker(*args, mode="name"):
         nonlocal run
         run += 1
         command = shlex.join(["env", *(f"{k}={v}" for k, v in env.items()), "SHELL=/bin/sh", str(BINARY), "-i", *args])
         tmux("send-keys", "-l", f"{command} >{shlex.quote(str(output))}; printf 'PICKER DONE {run}\\n'")
         tmux("send-keys", "Enter")
-        wait_screen(r"^name>")
+        wait_screen(rf"^{mode}>")
+
+    def close_picker(key):
+        tmux("send-keys", key)
+        wait_screen(rf"(?m)^PICKER DONE {run}$")
+        return output.read_text()
+
+    def cli(*args):
+        return subprocess.check_output([BINARY, *args], env={**os.environ, **env}, text=True, timeout=5)
 
     def choose(name):
         tmux("send-keys", "C-f")
@@ -70,9 +78,7 @@ def verify(tmp):
         wait_screen(r"^transcript>", r"(?m)^ +0/0")
         tmux("send-keys", "-l", "not present")
         wait_screen(r"^transcript> not present", r"(?m)^ +0/0")
-        tmux("send-keys", "Escape")
-        wait_screen(rf"(?m)^PICKER DONE {run}$")
-        assert output.read_bytes() == b""
+        assert close_picker("Enter") == ""
         print("Native-only agy: menu shows zero exports and one native session; empty search stays blank.")
 
         exported.write_text(json.dumps({"cascadeId": ID, "steps": [
@@ -80,18 +86,36 @@ def verify(tmp):
             {"plannerResponse": {"response": "checking the opening date"}},
         ]}))
         for agent in AGENTS:
+            client = r"(?m)^client +" + agent + r"\b"
+            heading = r"(?m)^## user #[1-9]\d*$"
+            hit = cli("--paths", "-a", agent, "-c", "widget factory", "-n", "1").strip()
+            assert hit, agent
+
             open_picker("-a", "copilot")
             choose(agent)
-            wait_screen(r"(?m)^client +" + agent + r"\b", r"(?m)^file +")
+            wait_screen(client, r"(?m)^file +")
+            tmux("send-keys", "-l", "no searchable result")
+            wait_screen(r"^name> no searchable result", r"(?m)^ +0/\d+")
+            assert close_picker("M-p") == ""
+
+            open_picker("-a", agent)
+            wait_screen(client)
             tmux("send-keys", "C-q")
             wait_screen(r"^transcript>")
             tmux("send-keys", "-l", "widget factory")
-            wait_screen(r"^transcript> widget factory", r"(?m)^> .*\b" + agent + r"\b", r"(?m)^client +" + agent + r"\b")
-            tmux("send-keys", "M-m")
-            screen = wait_screen(rf"(?m)^PICKER DONE {run}$")
-            markdown = output.read_text()
-            assert re.search(r"(?m)^## user #[1-9]\d*$", markdown), (agent, markdown, screen)
-            print(f"{agent}: agent menu, name preview, transcript search preview, and Alt-M passed.")
+            wait_screen(r"^transcript> widget factory", client, heading)
+            path = close_picker("M-p").strip()
+            assert path == hit, (agent, path, hit)
+            assert re.search(heading, cli("-r", path)), agent
+
+            for key, expected in [("M-m", cli("-r", hit)), ("Enter", cli("-u", hit))]:
+                open_picker("-a", agent, "-c", "widget factory", mode="transcript")
+                wait_screen(r"^transcript> widget factory", client, heading)
+                assert close_picker(key).strip() == expected.strip(), (agent, key)
+            open_picker("-a", agent, "-c", "no searchable result", mode="transcript")
+            wait_screen(r"^transcript> no searchable result", r"(?m)^ +0/0")
+            assert close_picker("M-m") == ""
+            print(f"{agent}: name and transcript previews, no-match, Alt-P, Alt-M, Enter, and CLI read passed.")
     finally:
         tmux("kill-server")
 
