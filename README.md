@@ -1,7 +1,7 @@
 # asf - agent session finder
 
 Find a coding-agent session by name or transcript text. Supports Claude Code, Codex,
-Pi, OpenCode, Gemini, Copilot, and Hermes. Uses FFF to search cached session metadata;
+Pi, OpenCode, Gemini, Copilot, Hermes, and Antigravity exports. Uses FFF to search cached session metadata;
 `-c` searches transcript text.
 
 ## Install
@@ -36,6 +36,10 @@ Read your current Pi session:
 asf -r "$PI_INTERCOM_SESSION_ID" --role user --tail 10
 ```
 
+Markdown headings show a source record number, such as `## user #42`. Filtering
+keeps those numbers. Use `asf -r SESSION --around 42` to read that message and the
+visible message on either side. Use the same `--tools` or `--think` flags if needed.
+
 `--role user|assistant|tool` filters before `--head` and `--tail`. `--tools` keeps tool
 calls/results; `--think` keeps reasoning. `--role tool` enables `--tools`.
 `-a AGENT` limits results to one agent; in name search, it also limits which stores are
@@ -62,8 +66,8 @@ A date-only `--until 2026-10-25` means midnight starting that day, not its end.
 
 `--jsonl` requires `--read`. Each line has `session_id`, `agent`, `cwd`, `timestamp` (UTC
 RFC3339 or null), `role`, `text`, and `source`. Source locations use a file and 1-based line
-for JSONL, a 1-based array index for Gemini, message/part files for OpenCode, or a database
-session and row ID for Hermes. Missing fields are null; no timestamp is inferred from file age.
+for JSONL, a 1-based array index for Gemini and Antigravity, message/part files and a
+1-based index for OpenCode, or a database session and row ID for Hermes. Missing fields are null; no timestamp is inferred from file age.
 Text follows the same tool/reasoning visibility flags as Markdown. JSONL retains distinct
 source records even when their text repeats; Markdown still collapses adjacent resend copies.
 Head/tail cuts add no omission records to JSONL. An empty JSONL selection succeeds with no output.
@@ -80,22 +84,51 @@ JSONL logs are read from their saved offset. The first indexing run can be slow.
 Use `asf --refresh` to complete it before searching.
 
 Cache: `${XDG_CACHE_HOME:-~/.cache}/asf/metadata-v2/`. After editing old records,
-delete this directory and run `asf --refresh`. <!-- PI/OpenAI -->
+delete this directory and run `asf --refresh`. The cache contains opening messages;
+keep it private. New cache files and directories are private by default. <!-- PI/OpenAI -->
 
 ## Picker
 
 The picker opens immediately. After metadata refresh, results arrive newest-first.
 Transcript search scans the full store before showing matches.
 
-- `enter`: resume command; `alt-p`: transcript path; `alt-m`: markdown transcript
-- `ctrl-q`: switch name/transcript search
-- `f1` to `f6`: one agent; `f7`: all agents
-- `pgup`/`pgdn`: list pages; `ctrl-up`/`ctrl-down`: preview pages
+Press `?` for the full key list and `q` to return to the picker.
+
+- Output: `Enter` prints the resume command without running it. `Alt-P` prints the
+  transcript path. `Alt-M` exports Markdown to stdout, for example `asf -i > session.md`.
+  Each closes the picker.
+- Search: `Ctrl-Q` switches between names and transcripts. `Ctrl-F` opens the agent
+  menu. It shows file counts and latest dates across each store, before search filters.
+  For Antigravity, it counts JSON exports and native sessions separately. Choose an
+  agent or **All agents** with `Enter`, or press `Esc` to cancel. <!-- PI/OpenAI -->
+- Navigation: `Up`/`Down` select a session; `PgUp`/`PgDn` move through the list by page.
+  `Shift-Up`/`Shift-Down` scroll the preview. `Esc` closes without printing.
+
+## Antigravity
+
+`asf -a agy` reads `<id>.trajectory.json` exports from `~/.gemini/antigravity-cli/conversations/`
+(CLI) and `~/.gemini/antigravity/conversations/` (IDE). An export shows the conversation as of
+export time. The reader supports user and assistant turns, reasoning, and assistant tool-call
+summaries. It does not render every tool result or infer a working directory.
+
+Use a reviewed copy of [agy-reader](https://github.com/mjacobs/agy-reader) to export a native
+`.db` or `.pb` session. For a CLI session:
+
+```sh
+id=YOUR_CONVERSATION_UUID
+store="$HOME/.gemini/antigravity-cli/conversations"
+agy-reader export-offline --format=json --out="$store/$id.trajectory.json" "$store/$id.db"
+asf -a agy -r "$id"
+```
+
+`asf` does not install or run `agy-reader`, connect to the Antigravity daemon, or read its
+credentials. Treat exports as private transcripts. <!-- PI/OpenAI -->
 
 ## Development
 
 ```sh
 cargo +stable test --locked
+python3 tests/picker.py  # requires tmux and sqlite3
 ```
 
 Dependency changes use `cargo +nightly update` to retain the eight-day publish-age hold.

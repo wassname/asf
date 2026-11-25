@@ -554,6 +554,7 @@ fn main() {
             &query,
             args.agent.as_deref(),
             false,
+            args.sub,
         );
         stop.store(true, Ordering::Relaxed);
         return;
@@ -655,11 +656,14 @@ fn main() {
             &query,
             args.agent.as_deref(),
             args.content,
+            args.sub,
         );
     } else if args.rows {
         rows.truncate(args.limit);
-        sessions::hydrate(&mut rows, &query);
-        println!("{}", rows_tsv(&rows));
+        if !rows.is_empty() {
+            sessions::hydrate(&mut rows, &query);
+            println!("{}", rows_tsv(&rows));
+        }
     } else if args.paths {
         rows.truncate(args.limit);
         let paths: Vec<String> = rows.iter().map(|r| r.path.clone()).collect();

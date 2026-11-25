@@ -1,6 +1,6 @@
 //! Skim picker for sessions and agent filters. -- PI/OpenAI
 
-use crate::sessions::{SOURCES, resume_for_path, session_of};
+use crate::sessions::{SOURCES, resume_for_path, session_of, store_summary};
 use crate::transcript::{self, ReadOptions};
 use skim::prelude::*;
 use skim::reader::CommandCollector;
@@ -52,13 +52,19 @@ impl CommandCollector for Collector {
 
 const ALL: &str = "All agents";
 
-fn choose_agent(current: Option<&str>) -> Option<&str> {
-    let choices = std::iter::once(ALL)
-        .chain(SOURCES.iter().map(|&(agent, _)| agent))
+fn choose_agent(current: Option<&str>, sub: bool) -> Option<&str> {
+    let choices = std::iter::once(format!("{ALL:<12}\t"))
+        .chain(
+            SOURCES
+                .iter()
+                .map(|&(agent, _)| format!("{agent:<12}\t{}", store_summary(agent, sub))),
+        )
         .collect::<Vec<_>>()
         .join("\n");
     let options = SkimOptions {
         layout: "reverse".into(),
+        delimiter: "\t".into(),
+        exact: true,
         prompt: "agent> ".into(),
         header: Some(format!(
             "Filter agent (current: {})\nType or use Up/Down | Enter apply | Esc cancel",
@@ -66,18 +72,24 @@ fn choose_agent(current: Option<&str>) -> Option<&str> {
         )),
         ..Default::default()
     };
-    let items =
-        SkimItemReader::new(SkimItemReaderOption::default()).of_bufread(Cursor::new(choices));
+    let items = SkimItemReader::new(
+        SkimItemReaderOption::default()
+            .delimiter("\t")
+            .nth(["1"].into_iter()),
+    )
+    .of_bufread(Cursor::new(choices));
     let Some(out) = Skim::run_with(&options, Some(items)).filter(|out| !out.is_abort) else {
         return current;
     };
     let Some(chosen) = out.selected_items.first() else {
         return current;
     };
+    let label = chosen.output();
+    let name = label.split('\t').next().unwrap().trim_end();
     SOURCES
         .iter()
         .map(|&(agent, _)| agent)
-        .find(|&agent| agent == chosen.output())
+        .find(|&agent| agent == name)
 }
 
 pub fn pick(
@@ -86,6 +98,7 @@ pub fn pick(
     query: &str,
     mut agent: Option<&str>,
     mut content: bool,
+    sub: bool,
 ) {
     let bat = Command::new("bat")
         .arg("--version")
@@ -194,7 +207,7 @@ Press q to return to the picker."
             out.query.clone()
         };
         match out.final_key {
-            Key::Ctrl('f') => agent = choose_agent(agent),
+            Key::Ctrl('f') => agent = choose_agent(agent, sub),
             Key::Ctrl('q') => content = !content,
             _ => break out,
         }

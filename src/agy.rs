@@ -15,7 +15,7 @@ pub fn id(path: &Path) -> Option<&str> {
     UUID.is_match(id).then_some(id).filter(|id| id.len() == 36)
 }
 
-pub fn paths() -> Vec<PathBuf> {
+fn conversation_files() -> impl Iterator<Item = PathBuf> {
     [CLI, IDE]
         .into_iter()
         .flat_map(|root| {
@@ -26,8 +26,33 @@ pub fn paths() -> Vec<PathBuf> {
         })
         .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
         .map(|entry| entry.path())
+}
+
+pub fn paths() -> Vec<PathBuf> {
+    conversation_files()
         .filter(|path| id(path).is_some())
         .collect()
+}
+
+pub fn native_summary() -> (usize, Option<f64>) {
+    let files = conversation_files()
+        .filter(|path| matches!(path.extension().and_then(|s| s.to_str()), Some("db" | "pb")))
+        .filter(|path| {
+            path.file_stem()
+                .and_then(|s| s.to_str())
+                .is_some_and(|s| s.len() == 36 && UUID.is_match(s))
+        })
+        .collect::<Vec<_>>();
+    let count = files
+        .iter()
+        .map(|path| path.with_extension(""))
+        .collect::<std::collections::HashSet<_>>()
+        .len();
+    let latest = files
+        .iter()
+        .map(|path| mtime(&path.to_string_lossy()))
+        .reduce(f64::max);
+    (count, latest)
 }
 
 fn load(path: &str) -> Result<Value, String> {

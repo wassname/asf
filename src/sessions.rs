@@ -721,6 +721,77 @@ pub fn indexed_row(path: &str) -> Option<Row> {
     rows.into_iter().next()
 }
 
+fn session_files(agent: &str, sub: bool) -> Vec<PathBuf> {
+    if agent == "agy" {
+        return agy::paths();
+    }
+    let mut root = store(agent);
+    if agent == "opencode" {
+        root.push("session");
+    }
+    let depth = match agent {
+        "codex" => 4,
+        "gemini" => 3,
+        "claude" if sub => 4,
+        _ => 2,
+    };
+    scan::session_files(&root, depth)
+        .into_iter()
+        .filter(|path| match agent {
+            "pi" | "claude" => path.extension().is_some_and(|ext| ext == "jsonl"),
+            "copilot" => path.ends_with("events.jsonl"),
+            "opencode" => path
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .starts_with("ses_"),
+            _ => true,
+        })
+        .collect()
+}
+
+pub fn store_summary(agent: &str, sub: bool) -> String {
+    let (count, latest) = if agent == "hermes" {
+        let rows = hermes::sessions();
+        (
+            rows.len(),
+            rows.iter().map(|row| row.mtime).reduce(f64::max),
+        )
+    } else {
+        let paths = session_files(agent, sub);
+        (
+            paths.len(),
+            paths
+                .iter()
+                .map(|path| mtime(&path.to_string_lossy()))
+                .reduce(f64::max),
+        )
+    };
+    let unit = match agent {
+        "agy" => "export",
+        "hermes" => "session",
+        _ => "file",
+    };
+    let plural = |n| if n == 1 { "" } else { "s" };
+    let mut summary = format!("{count} {unit}{}", plural(count));
+    if let Some(latest) = latest {
+        summary.push_str(&format!("  |  Latest: {}", day(latest, "%Y-%m-%d %H:%M")));
+    }
+    if agent == "agy" {
+        let (native, latest_native) = agy::native_summary();
+        summary.push_str(&format!("  |  {native} native session{}", plural(native)));
+        if latest.is_none()
+            && let Some(at) = latest_native
+        {
+            summary.push_str(&format!(
+                "  |  Latest native: {}",
+                day(at, "%Y-%m-%d %H:%M")
+            ));
+        }
+    }
+    summary
+}
+
 pub fn stream_names(
     query: &str,
     regex: bool,
@@ -736,38 +807,14 @@ pub fn stream_names(
     let mut cache = MetadataIndex::load();
     let mut files: Vec<(f64, Candidate)> = SOURCES
         .iter()
-        .filter(|(source, _)| {
-            !["hermes", "agy"].contains(source) && agent.is_none_or(|a| a == *source)
-        })
+        .filter(|(source, _)| *source != "hermes" && agent.is_none_or(|a| a == *source))
         .flat_map(|(source, _)| {
-            let root = if *source == "opencode" {
-                store(source).join("session")
-            } else {
-                store(source)
-            };
-            let depth = match *source {
-                "codex" => 4,
-                "gemini" => 3,
-                "claude" if sub => 4,
-                _ => 2,
-            };
-            scan::session_files(&root, depth)
-                .into_iter()
-                .filter(move |path| {
-                    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-                    match *source {
-                        "pi" | "claude" => path.extension().is_some_and(|ext| ext == "jsonl"),
-                        "copilot" => stem == "events",
-                        "opencode" => stem.starts_with("ses_"),
-                        _ => true,
-                    }
-                })
-                .map(move |path| {
-                    (
-                        mtime(&path.to_string_lossy()),
-                        Candidate::File(source.to_string(), path),
-                    )
-                })
+            session_files(source, sub).into_iter().map(move |path| {
+                (
+                    mtime(&path.to_string_lossy()),
+                    Candidate::File(source.to_string(), path),
+                )
+            })
         })
         .collect();
     if agent.is_none_or(|a| a == "hermes") {
@@ -776,14 +823,6 @@ pub fn stream_names(
                 .into_iter()
                 .map(|row| (row.mtime, Candidate::Hermes(row))),
         );
-    }
-    if agent.is_none_or(|a| a == "agy") {
-        files.extend(agy::paths().into_iter().map(|path| {
-            (
-                mtime(&path.to_string_lossy()),
-                Candidate::File("agy".into(), path),
-            )
-        }));
     }
     files.sort_by(|a, b| b.0.total_cmp(&a.0));
     let mut indexed_rows = Vec::new();
