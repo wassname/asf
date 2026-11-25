@@ -493,25 +493,6 @@ where
         )
     };
     for (agent, paths) in stores {
-        if agent == "agy" {
-            for path in paths {
-                let path = path.to_string_lossy();
-                match agy::session(&path) {
-                    Ok(row) => add(
-                        &path,
-                        Found {
-                            cwd: row.cwd,
-                            title: row.title,
-                            line: row.line,
-                            sub: row.sub,
-                            ..Default::default()
-                        },
-                    ),
-                    Err(error) => eprintln!("asf: {error}"),
-                }
-            }
-            continue;
-        }
         let found = NAME_PATTERNS.iter().find(|(a, _, _)| a == agent);
         if let Some((_, _, header)) = found.filter(|(_, _, h)| !h.is_empty()) {
             for (path, hits) in names(header, paths, 1) {
@@ -1084,26 +1065,30 @@ pub fn preview(path: &str, at: u64) -> Result<String, String> {
     let agent = agent_of(path);
     let mut cwd = String::new();
     let mut title = String::new();
-    let mut at_time = if agent == "agy" {
-        agy::modified(path)
-    } else {
-        mtime(path)
-    };
-    if agent == "hermes"
-        && let Some(row) = hermes::session_of(path)
-    {
-        cwd = row.cwd;
-        title = row.title;
+    let agy_preview = (agent == "agy")
+        .then(|| agy::conversation(path, 0, Show::default()))
+        .transpose()?;
+    let mut at_time = mtime(path);
+    if let Some((row, _)) = &agy_preview {
+        cwd.clone_from(&row.cwd);
+        title.clone_from(&row.title);
         at_time = row.mtime;
+    } else if agent == "hermes" {
+        if let Some(row) = hermes::session_of(path) {
+            cwd = row.cwd;
+            title = row.title;
+            at_time = row.mtime;
+        }
+    } else {
+        name_sessions(&[(agent.clone(), vec![PathBuf::from(path)])], |_, found| {
+            if cwd.is_empty() {
+                cwd = found.cwd;
+            }
+            if (found.force && !found.title.is_empty()) || title.is_empty() {
+                title = found.title;
+            }
+        });
     }
-    name_sessions(&[(agent.clone(), vec![PathBuf::from(path)])], |_, found| {
-        if cwd.is_empty() {
-            cwd = found.cwd;
-        }
-        if (found.force && !found.title.is_empty()) || title.is_empty() {
-            title = found.title;
-        }
-    });
 
     let raw = if agent == "agy" {
         String::new()
@@ -1144,13 +1129,17 @@ pub fn preview(path: &str, at: u64) -> Result<String, String> {
         "file",
         path.replace(&home().to_string_lossy().to_string(), "~"),
     ));
-    let said: Vec<_> =
-        crate::transcript::deduplicate(crate::transcript::messages(path, 0, Show::default())?)
-            .iter()
-            .map(crate::transcript::Message::markdown)
-            .collect();
+    let messages = match agy_preview {
+        Some((_, messages)) => messages,
+        None => crate::transcript::messages(path, 0, Show::default())?,
+    };
     let matched = if at == 0 {
         String::new()
+    } else if agent == "agy" {
+        messages
+            .iter()
+            .find(|message| message.number() == at)
+            .map_or_else(String::new, crate::transcript::Message::markdown)
     } else {
         crate::transcript::read(
             path,
@@ -1160,9 +1149,13 @@ pub fn preview(path: &str, at: u64) -> Result<String, String> {
             },
         )?
     };
-    // in name mode the match IS the first message, and printing it twice wastes the pane
+    let said: Vec<_> = crate::transcript::deduplicate(messages)
+        .iter()
+        .map(crate::transcript::Message::markdown)
+        .collect();
     if !matched.is_empty() && said.first() != Some(&matched) {
-        out.push(format!("--- match, line {at} ---"));
+        let unit = if agent == "agy" { "step" } else { "line" };
+        out.push(format!("--- match, {unit} {at} ---"));
         out.push(cut(&matched, 220));
     }
     out.push(String::new());

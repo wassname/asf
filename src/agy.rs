@@ -31,8 +31,9 @@ pub fn paths() -> Vec<PathBuf> {
 }
 
 pub fn modified(path: &str) -> f64 {
-    if std::fs::metadata(format!("{path}-wal")).is_ok_and(|meta| meta.len() > 0) {
-        mtime(path).max(mtime(&format!("{path}-wal")))
+    let wal = format!("{path}-wal");
+    if std::fs::metadata(&wal).is_ok_and(|meta| meta.len() > 0) {
+        mtime(path).max(mtime(&wal))
     } else {
         mtime(path)
     }
@@ -132,8 +133,8 @@ pub fn session(path: &str) -> Result<Row, String> {
     collect(path, 0, Show::default(), true).map(|(row, _)| row)
 }
 
-pub fn messages(path: &str, at: u64, show: Show) -> Result<Vec<Message>, String> {
-    collect(path, at, show, false).map(|(_, messages)| messages)
+pub fn conversation(path: &str, at: u64, show: Show) -> Result<(Row, Vec<Message>), String> {
+    collect(path, at, show, false)
 }
 
 fn collect(path: &str, at: u64, show: Show, opening: bool) -> Result<(Row, Vec<Message>), String> {
@@ -147,7 +148,7 @@ fn collect(path: &str, at: u64, show: Show, opening: bool) -> Result<(Row, Vec<M
         if message.role == "user" && row.opening.is_empty() {
             row.opening = clean(&message.text, 110);
             row.title = row.opening.clone();
-            row.line = (record.idx + 1) as u64;
+            row.line = message.number();
             if opening {
                 break;
             }
@@ -161,14 +162,13 @@ pub fn search_content(pattern: &regex::Regex, query: &str) -> Vec<Row> {
     paths()
         .into_iter()
         .filter_map(|path| {
-            let (mut row, messages) = match collect(
+            let (mut row, messages) = match conversation(
                 path.to_str()?,
                 0,
                 Show {
                     tools: true,
                     think: true,
                 },
-                false,
             ) {
                 Ok(result) => result,
                 Err(error) => {
@@ -179,7 +179,7 @@ pub fn search_content(pattern: &regex::Regex, query: &str) -> Vec<Row> {
             let hit = messages
                 .iter()
                 .find(|message| pattern.is_match(&message.text))?;
-            row.line = hit.source.index.unwrap() as u64;
+            row.line = hit.number();
             row.matched = window(&hit.text, query, 110);
             Some(row)
         })
@@ -229,10 +229,8 @@ impl Record {
             record_id = None;
         } else {
             text = turn.text(1).to_owned();
-            record_id = turn
-                .last_bytes(6)
-                .and_then(|s| std::str::from_utf8(s).ok())
-                .map(str::to_owned);
+            let id = turn.text(6);
+            record_id = (!id.is_empty()).then(|| id.to_owned());
             if show.think {
                 for line in turn.text(3).lines() {
                     text.push_str(&format!("\n> {line}"));

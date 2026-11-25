@@ -57,7 +57,7 @@ impl Message {
         }
     }
 
-    fn number(&self) -> u64 {
+    pub(crate) fn number(&self) -> u64 {
         self.source
             .line
             .or(self.source.index.map(|n| n as u64))
@@ -189,7 +189,7 @@ fn array_messages(entries: &[Value], session: &Row, show: Show) -> Vec<Message> 
 
 pub fn messages(path: &str, at: u64, show: Show) -> Result<Vec<Message>, String> {
     if sessions::agent_of(path) == "agy" {
-        return crate::agy::messages(path, at, show);
+        return crate::agy::conversation(path, at, show).map(|(_, messages)| messages);
     }
     let session = context(path);
     if session.agent == "hermes" {

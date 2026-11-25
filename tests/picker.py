@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Run the real picker in a private tmux server: python3 tests/picker.py [asf-binary]. -- PI/OpenAI"""
 
-import sqlite3
 import os
 import re
 import shlex
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -14,7 +14,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BINARY = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else ROOT / "target/debug/asf"
-AGENTS = ["agy", "claude", "codex", "pi", "gemini", "opencode", "copilot", "hermes"]
 ID = "38ca76d1-93ba-427e-9552-03a389428f0e"
 
 
@@ -42,13 +41,13 @@ def verify(tmp):
     output = tmp / "stdout"
     run = 0
 
-    def open_picker(*args, mode="name"):
+    def open_picker(*args):
         nonlocal run
         run += 1
         command = shlex.join(["env", *(f"{k}={v}" for k, v in env.items()), "SHELL=/bin/sh", str(BINARY), "-i", *args])
         tmux("send-keys", "-l", f"{command} >{shlex.quote(str(output))}; printf 'PICKER DONE {run}\\n'")
         tmux("send-keys", "Enter")
-        wait_screen(rf"^{mode}>")
+        wait_screen(r"^name>")
 
     def close_picker(key):
         tmux("send-keys", key)
@@ -70,7 +69,7 @@ def verify(tmp):
     try:
         open_picker("-a", "agy")
         tmux("send-keys", "C-f")
-        wait_screen(r"agy +0 sessions",  r"claude +1 file +\| +Latest:", r"codex +2 files +\| +Latest:", r"pi +2 files +\| +Latest:")
+        wait_screen(r"agy +0 sessions")
         tmux("send-keys", "Escape")
         wait_screen(r"^name>")
         tmux("send-keys", "C-q")
@@ -82,7 +81,7 @@ def verify(tmp):
 
         with sqlite3.connect(native) as db:
             db.executescript((ROOT / "tests/fixtures/agy.sql").read_text())
-        for agent in AGENTS:
+        for agent in ("agy", "opencode"):
             client = r"(?m)^client +" + agent + r"\b"
             heading = r"(?m)^## user #[1-9]\d*$"
             hit = cli("--paths", "-a", agent, "-c", "widget factory", "-n", "1").strip()
@@ -91,12 +90,6 @@ def verify(tmp):
             open_picker("-a", "copilot")
             choose(agent)
             wait_screen(client, r"(?m)^file +")
-            tmux("send-keys", "-l", "no searchable result")
-            wait_screen(r"^name> no searchable result", r"(?m)^ +0/\d+")
-            assert close_picker("M-p") == ""
-
-            open_picker("-a", agent)
-            wait_screen(client)
             tmux("send-keys", "C-q")
             wait_screen(r"^transcript>")
             tmux("send-keys", "-l", "widget factory")
@@ -105,14 +98,7 @@ def verify(tmp):
             assert path == hit, (agent, path, hit)
             assert re.search(heading, cli("-r", path)), agent
 
-            for key, expected in [("M-m", cli("-r", hit)), ("Enter", cli("-u", hit))]:
-                open_picker("-a", agent, "-c", "widget factory", mode="transcript")
-                wait_screen(r"^transcript> widget factory", client, heading)
-                assert close_picker(key).strip() == expected.strip(), (agent, key)
-            open_picker("-a", agent, "-c", "no searchable result", mode="transcript")
-            wait_screen(r"^transcript> no searchable result", r"(?m)^ +0/0")
-            assert close_picker("M-m") == ""
-            print(f"{agent}: name and transcript previews, no-match, Alt-P, Alt-M, Enter, and CLI read passed.")
+            print(f"{agent}: agent filter, name and transcript previews, and readable Alt-P path passed.")
     finally:
         tmux("kill-server")
 

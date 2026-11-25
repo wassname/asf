@@ -66,8 +66,9 @@ A date-only `--until 2026-10-25` means midnight starting that day, not its end.
 
 `--jsonl` requires `--read`. Each line has `session_id`, `agent`, `cwd`, `timestamp` (UTC
 RFC3339 or null), `role`, `text`, and `source`. Source locations use a file and 1-based line
-for JSONL, a 1-based array index for Gemini and Antigravity, message/part files and a
-1-based index for OpenCode, or a database session and row ID for Hermes. Missing fields are null; no timestamp is inferred from file age.
+for JSONL, a 1-based array index for Gemini, a 1-based SQLite step number for Antigravity,
+message/part files and a 1-based index for OpenCode, or a database session and row ID for Hermes.
+Missing fields are null; no timestamp is inferred from file age. <!-- PI/OpenAI -->
 Text follows the same tool/reasoning visibility flags as Markdown. JSONL retains distinct
 source records even when their text repeats; Markdown still collapses adjacent resend copies.
 Head/tail cuts add no omission records to JSONL. An empty JSONL selection succeeds with no output.
