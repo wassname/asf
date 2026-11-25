@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the real picker in a private tmux server: python3 tests/picker.py [asf-binary]. -- PI/OpenAI"""
+"""Run the real picker in a private tmux server: python3 tests/integration/picker.py [asf-binary]. -- PI/OpenAI"""
 
 import os
 import re
@@ -12,7 +12,7 @@ import tempfile
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 BINARY = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else ROOT / "target/debug/asf"
 ID = "38ca76d1-93ba-427e-9552-03a389428f0e"
 
@@ -89,7 +89,19 @@ def verify(tmp):
 
             open_picker("-a", "copilot")
             choose(agent)
-            wait_screen(client, r"(?m)^file +")
+            screen = wait_screen(client, r"(?m)^file +")
+            if agent == "agy":
+                top = next(i for i, line in enumerate(screen.splitlines()) if line.startswith("client "))
+                row = rf"\A(?:[^\n]*\n){{{top}}}"
+                tmux("send-keys", "S-Down")
+                wait_screen(row + r"date +")
+                tmux("send-keys", "S-Up")
+                wait_screen(row + r"client +agy")
+                tmux("send-keys", "PageDown")
+                wait_screen(row + r"(?!client |date )", r"(?m)^> .*\bagy\b")
+                tmux("send-keys", "PageUp")
+                wait_screen(row + r"client +agy")
+                print("Page and Shift arrows scroll the preview without changing selection.")
             tmux("send-keys", "C-q")
             wait_screen(r"^transcript>")
             tmux("send-keys", "-l", "widget factory")

@@ -101,8 +101,8 @@ Press `?` for the full key list and `q` to return to the picker.
 - Search: `Ctrl-Q` switches between names and transcripts. `Ctrl-F` opens the agent
   menu. It shows file counts and latest dates across each store, before search filters.
   Choose an agent or **All agents** with `Enter`, or press `Esc` to cancel. <!-- PI/OpenAI -->
-- Navigation: `Up`/`Down` select a session; `PgUp`/`PgDn` move through the list by page.
-  `Shift-Up`/`Shift-Down` scroll the preview. `Esc` closes without printing.
+- Navigation: `Up`/`Down` select a session. `PgUp`/`PgDn` scroll the preview by page;
+  `Shift-Up`/`Shift-Down` scroll it by line. `Esc` closes without printing. <!-- PI/OpenAI -->
 
 ## Antigravity
 
@@ -115,8 +115,12 @@ files and separate tool results are not supported. <!-- PI/OpenAI -->
 
 ```sh
 cargo +stable test --locked
-python3 tests/picker.py  # requires tmux and sqlite3
+# Optional terminal check (Python, tmux, and sqlite3):
+python3 tests/integration/picker.py
 ```
+
+GitHub Releases builds Linux x86-64 and ARM64 archives when a version tag such as
+`v0.1.0` is pushed. Each archive has a SHA-256 checksum. <!-- PI/OpenAI -->
 
 Dependency changes use `cargo +nightly update` to retain the eight-day publish-age hold.
 `RESEARCH_JOURNAL.md` records store formats and implementation notes.

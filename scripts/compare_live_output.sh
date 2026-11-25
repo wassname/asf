@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Record what asf prints, so a change can be diffed against the build before it.
 #
-#   tests/golden.sh record before target/release/asf   # then change something
-#   tests/golden.sh record after  target/release/asf
-#   tests/golden.sh diff                               # before against after
+#   scripts/compare_live_output.sh record before target/release/asf   # then change something
+#   scripts/compare_live_output.sh record after  target/release/asf
+#   scripts/compare_live_output.sh diff                               # before against after
 #
 # Each query below once found a fault. Keep them.
 set -uo pipefail
@@ -33,8 +33,8 @@ QUERIES=(
 )
 
 one() {  # name bin index
-    local file="tests/golden/$1/$(printf '%02d' "$3").txt"
-    mkdir -p "tests/golden/$1"
+    local file=".local/golden/$1/$(printf '%02d' "$3").txt"
+    mkdir -p ".local/golden/$1"
     # shellcheck disable=SC2086
     $2 ${QUERIES[$3]} -n 8 > "$file" 2>&1
     echo "exit=$?" >> "$file"
@@ -43,10 +43,10 @@ one() {  # name bin index
 record() {
     local name="$1" bin="$2"
     for i in "${!QUERIES[@]}"; do one "$name" "$bin" "$i"; done
-    echo "recorded ${#QUERIES[@]} queries to tests/golden/$name"
+    echo "recorded ${#QUERIES[@]} queries to .local/golden/$name"
 }
 
-# Record two binaries per query, seconds apart:  tests/golden.sh both /tmp/asf-old target/release/asf
+# Record two binaries per query, seconds apart:  scripts/compare_live_output.sh both /tmp/asf-old target/release/asf
 # A live session gets written while this runs, so two full passes drift and rows move for
 # reasons that are not the code.
 both() {
@@ -63,8 +63,8 @@ case "${1:-diff}" in
     diff)
         fail=0
         left="${2:-before}" right="${3:-after}"
-        for f in tests/golden/$left/*.txt; do
-            b=tests/golden/$right/$(basename "$f")
+        for f in .local/golden/$left/*.txt; do
+            b=.local/golden/$right/$(basename "$f")
             [ -f "$b" ] || { echo "MISSING $b"; fail=1; continue; }
             # sorted: a session written while this runs moves rank between the two reads,
             # so compare the set of rows, not their order

@@ -105,7 +105,7 @@ fn antigravity_reads_native_sqlite_and_keeps_step_numbers() {
             &Command::new("sqlite3")
                 .args(["-init", "/dev/null"])
                 .arg(&path)
-                .arg(format!("\n{}", include_str!("fixtures/agy.sql")))
+                .arg(format!("\n{}", include_str!("../fixtures/agy.sql")))
                 .output()
                 .unwrap(),
         );

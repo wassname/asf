@@ -8,13 +8,12 @@
 //!     asf --paths -c steer     just the transcript paths, for piping
 //!
 
-mod agy;
-mod hermes;
 mod metadata;
 mod pick;
 mod record;
 mod scan;
 mod sessions;
+mod stores;
 mod transcript;
 
 use clap::{Parser, ValueEnum};
@@ -24,6 +23,7 @@ use std::os::unix::net::UnixStream;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use stores::{agy, hermes};
 
 #[derive(Clone, Copy, ValueEnum)]
 enum Role {

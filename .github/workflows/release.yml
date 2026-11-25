@@ -1,0 +1,70 @@
+# PI/OpenAI
+name: Release
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  RUST_VERSION: '1.100.0'
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install build and test tools
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          sudo apt-get update
+          sudo apt-get install -y sqlite3 libclang-dev
+      - name: Test and build
+        run: |
+          cargo +"$RUST_VERSION" test --locked
+          cargo +"$RUST_VERSION" build --locked --release
+      - name: Package binary
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir dist
+          archive="asf-linux-$ARCH.tar.gz"
+          tar -czf "dist/$archive" -C target/release asf
+          (cd dist && sha256sum "$archive" > "$archive.sha256")
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: asf-linux-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: asf-linux-*
+          merge-multiple: true
+          path: dist
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          sha256sum --check *.sha256
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes ./*.tar.gz ./*.sha256

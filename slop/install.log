@@ -1,9 +1,0 @@
-warning: ignoring `resolver.incompatible-publish-age` without `-Zmin-publish-age`
-warning: ignoring `registry.global-min-publish-age` without `-Zmin-publish-age`
-warning: ignoring `resolver.incompatible-publish-age` without `-Zmin-publish-age`
-warning: ignoring `registry.global-min-publish-age` without `-Zmin-publish-age`
-  Installing asf v0.1.0 (/workspace/asf)
-   Compiling asf v0.1.0 (/workspace/asf)
-    Finished `release` profile [optimized] target(s) in 1m 26s
-   Replacing /home/code/.cargo/bin/asf
-    Replaced package `asf v0.1.0 (/workspace/asf)` with `asf v0.1.0 (/workspace/asf)` (executable `asf`)

@@ -5,7 +5,7 @@
 # ///
 """Drive the picker in a pty and print what the screen ended up showing.
 
-    tests/drive.py 'target/release/asf -i steer' Down Down PageDown --sleep 3
+    uv run scripts/drive_picker.py 'target/release/asf -i steer' Down Down PageDown --sleep 3
 
 Keys are names from KEYS below, or literal text to type. The last screen is what
 a person would see, so that is what gets printed: escape codes stripped.

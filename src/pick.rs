@@ -128,8 +128,9 @@ pub fn pick(
   Ctrl-F          Choose an agent or All agents
 
 {heading}Navigation{reset}
-  Up/Down         Select a session; PgUp/PgDn move by page
-  Shift-Up/Down   Scroll the transcript preview
+  Up/Down         Select a session
+  PgUp/PgDn       Scroll the preview by page
+  Shift-Up/Down   Scroll the preview by line
   Esc             Close without printing
 
 Press q to return to the picker."
@@ -175,7 +176,11 @@ Press q to return to the picker."
             format!("{me} --preview {{2}} --line {{3}}")
         }),
         preview_window: "down:65%:wrap".to_string(),
-        bind: vec![format!("?:execute[sh -c {}]", shell_arg(&help_command))],
+        bind: vec![
+            format!("?:execute[sh -c {}]", shell_arg(&help_command)),
+            "pgup:preview-page-up".into(),
+            "pgdn:preview-page-down".into(),
+        ],
         cmd_collector: collector.clone(),
         ..Default::default()
     };
@@ -194,7 +199,7 @@ Press q to return to the picker."
         options.query = (!content).then(|| query.clone());
         options.cmd_query = content.then(|| query.clone());
         options.header = Some(format!(
-            "Output: Enter print resume command | Alt-P print path | Alt-M export Markdown\nSearch: Ctrl-Q switch mode | Ctrl-F filter agent ({})\nNavigation: Up/Down select | Shift-Up/Down scroll preview | Esc close | ? help\n{}",
+            "Output: Enter print resume command | Alt-P print path | Alt-M export Markdown\nSearch: Ctrl-Q switch mode | Ctrl-F filter agent ({})\nNavigation: Up/Down select | PgUp/PgDn scroll preview | ? help\n{}",
             agent.unwrap_or(ALL),
             header_row()
         ));

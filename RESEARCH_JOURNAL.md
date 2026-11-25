@@ -83,7 +83,7 @@ the codex store to find the same thing doubled `asf` to 0.85 s.
 - `SkimOptions::with_nth` is dead in library mode. The one on `SkimItemReaderOption` is what
   works, and it keeps the full line in `output()`
 - there is no `change-header` action, so the mode has to show in the prompt
-- `tests/drive.py` renders the picker in a pty, so a key binding can be checked without a
+- `scripts/drive_picker.py` renders the picker in a pty, so a key binding can be checked without a
   person at a terminal
 
 ## sqlite
@@ -96,7 +96,7 @@ reported 537 threads where `mode=ro` reported 539.
 
 `cargo test` runs asf against `tests/fixtures/home`, a fake HOME holding one scrubbed session
 per agent. The records are real, so the schemas are real; every free-text value is replaced,
-so nothing private is committed. `tests/harvest.sh` rebuilds it.
+so nothing private is committed. `scripts/harvest_fixtures.sh` rebuilds it.
 
 Two fixture details are load-bearing. The claude file holds four stale copies of each name
 record and one live copy of each, because reading the first record instead of the last was a
@@ -115,9 +115,9 @@ catch went unnoticed. Scrubbed fixtures need the differences the test depends on
 ## Regression check
 
 ```sh
-tests/golden.sh record before target/release/asf   # then change something
-tests/golden.sh record after  target/release/asf
-tests/golden.sh diff
+scripts/compare_live_output.sh record before target/release/asf   # then change something
+scripts/compare_live_output.sh record after  target/release/asf
+scripts/compare_live_output.sh diff
 ```
 
 Each of the 20 queries once found a fault. Do not trim them.
