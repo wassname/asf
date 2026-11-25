@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run the real picker in a private tmux server: python3 tests/picker.py [asf-binary]. -- PI/OpenAI"""
 
-import json
+import sqlite3
 import os
 import re
 import shlex
@@ -23,8 +23,7 @@ def verify(tmp):
     shutil.copytree(ROOT / "tests/fixtures/home", home, ignore=shutil.ignore_patterns(".cache"))
     native = home / ".gemini/antigravity-cli/conversations" / f"{ID}.db"
     native.parent.mkdir(parents=True)
-    native.touch()
-    exported = native.with_suffix(".trajectory.json")
+
     env = {"HOME": str(home), "XDG_CACHE_HOME": str(tmp / "cache"), "TZ": "UTC"}
     tmux_cmd = ["tmux", "-S", str(tmp / "sock")]
 
@@ -71,7 +70,7 @@ def verify(tmp):
     try:
         open_picker("-a", "agy")
         tmux("send-keys", "C-f")
-        wait_screen(r"agy +0 exports +\| +1 native session +\| +Latest native:", r"claude +1 file +\| +Latest:", r"codex +2 files +\| +Latest:", r"pi +2 files +\| +Latest:")
+        wait_screen(r"agy +0 sessions",  r"claude +1 file +\| +Latest:", r"codex +2 files +\| +Latest:", r"pi +2 files +\| +Latest:")
         tmux("send-keys", "Escape")
         wait_screen(r"^name>")
         tmux("send-keys", "C-q")
@@ -79,12 +78,10 @@ def verify(tmp):
         tmux("send-keys", "-l", "not present")
         wait_screen(r"^transcript> not present", r"(?m)^ +0/0")
         assert close_picker("Enter") == ""
-        print("Native-only agy: menu shows zero exports and one native session; empty search stays blank.")
+        print("Empty Antigravity store: no phantom row or preview error.")
 
-        exported.write_text(json.dumps({"cascadeId": ID, "steps": [
-            {"userInput": {"userResponse": "the agy widget factory opens on tuesday"}},
-            {"plannerResponse": {"response": "checking the opening date"}},
-        ]}))
+        with sqlite3.connect(native) as db:
+            db.executescript((ROOT / "tests/fixtures/agy.sql").read_text())
         for agent in AGENTS:
             client = r"(?m)^client +" + agent + r"\b"
             heading = r"(?m)^## user #[1-9]\d*$"

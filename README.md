@@ -1,7 +1,7 @@
 # asf - agent session finder
 
 Find a coding-agent session by name or transcript text. Supports Claude Code, Codex,
-Pi, OpenCode, Gemini, Copilot, Hermes, and Antigravity exports. Uses FFF to search cached session metadata;
+Pi, OpenCode, Gemini, Copilot, Hermes, and Antigravity. Uses FFF to search session metadata;
 `-c` searches transcript text.
 
 ## Install
@@ -10,7 +10,7 @@ Pi, OpenCode, Gemini, Copilot, Hermes, and Antigravity exports. Uses FFF to sear
 cargo +stable install --path . --locked
 ```
 
-Put `~/.cargo/bin` on `PATH`. Hermes also needs `sqlite3`.
+Put `~/.cargo/bin` on `PATH`. Hermes and Antigravity need `sqlite3`.
 
 ## Use
 
@@ -99,30 +99,16 @@ Press `?` for the full key list and `q` to return to the picker.
   Each closes the picker.
 - Search: `Ctrl-Q` switches between names and transcripts. `Ctrl-F` opens the agent
   menu. It shows file counts and latest dates across each store, before search filters.
-  For Antigravity, it counts JSON exports and native sessions separately. Choose an
-  agent or **All agents** with `Enter`, or press `Esc` to cancel. <!-- PI/OpenAI -->
+  Choose an agent or **All agents** with `Enter`, or press `Esc` to cancel. <!-- PI/OpenAI -->
 - Navigation: `Up`/`Down` select a session; `PgUp`/`PgDn` move through the list by page.
   `Shift-Up`/`Shift-Down` scroll the preview. `Esc` closes without printing.
 
 ## Antigravity
 
-`asf -a agy` reads `<id>.trajectory.json` exports from `~/.gemini/antigravity-cli/conversations/`
-(CLI) and `~/.gemini/antigravity/conversations/` (IDE). An export shows the conversation as of
-export time. The reader supports user and assistant turns, reasoning, and assistant tool-call
-summaries. It does not render every tool result or infer a working directory.
-
-Use a reviewed copy of [agy-reader](https://github.com/mjacobs/agy-reader) to export a native
-`.db` or `.pb` session. For a CLI session:
-
-```sh
-id=YOUR_CONVERSATION_UUID
-store="$HOME/.gemini/antigravity-cli/conversations"
-agy-reader export-offline --format=json --out="$store/$id.trajectory.json" "$store/$id.db"
-asf -a agy -r "$id"
-```
-
-`asf` does not install or run `agy-reader`, connect to the Antigravity daemon, or read its
-credentials. Treat exports as private transcripts. <!-- PI/OpenAI -->
+`asf -i -a agy` reads SQLite sessions directly from `~/.gemini/antigravity-cli/conversations/`
+(CLI) and `~/.gemini/antigravity/conversations/` (IDE). No export is needed. Reads include
+user and assistant turns, optional reasoning and assistant tool-call summaries. Legacy `.pb`
+files and separate tool results are not supported. <!-- PI/OpenAI -->
 
 ## Development
 

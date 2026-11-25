@@ -378,9 +378,7 @@ fn one(args: &Args, path: &str) -> ! {
         std::process::exit(1);
     }
     if sessions::agent_of(path) == "agy" && agy::id(Path::new(path)).is_none() {
-        eprintln!(
-            "asf: expected an Antigravity <id>.trajectory.json export, not {path}; see the Antigravity section in README.md"
-        );
+        eprintln!("asf: expected a native Antigravity <id>.db session, not {path}");
         std::process::exit(1);
     }
     let out = if args.read.is_some() {

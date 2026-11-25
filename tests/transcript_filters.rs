@@ -96,24 +96,31 @@ fn user(id: &str, time: Option<&str>, text: &str) -> Value {
 const ID: &str = "01a10007-446e-7029-9d46-254776d94b86";
 
 #[test]
-fn antigravity_exports_are_discoverable_and_keep_step_numbers() {
+fn antigravity_reads_native_sqlite_and_keeps_step_numbers() {
     let home = Home::new();
-    let base = ".gemini/antigravity-cli/conversations";
-    let path = home.write(&format!("{base}/{ID}.trajectory.json"), &[json!({
-        "cascadeId": ID,
-        "steps": [
-            {"type": "CORTEX_STEP_TYPE_USER_INPUT", "userInput": {"userResponse": "review the rust changes"}, "metadata": {"createdAt":"2026-01-01T01:00:00Z"}},
-            {"type": "FUTURE_STEP"},
-            {"type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE", "plannerResponse": {"response": "found the duplicate entry", "thinking": "private reasoning"}, "metadata": {"createdAt":"2026-01-01T01:01:00Z"}}
-        ]
-    })]);
-    home.write(&format!("{base}/{ID}.db"), &[json!({"fake": true})]);
+    let build = |relative: String| {
+        let path = home.0.join(relative);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        stdout(
+            &Command::new("sqlite3")
+                .args(["-init", "/dev/null"])
+                .arg(&path)
+                .arg(format!("\n{}", include_str!("fixtures/agy.sql")))
+                .output()
+                .unwrap(),
+        );
+        path
+    };
+    let path = build(format!(".gemini/antigravity-cli/conversations/{ID}.db"));
     let child = "01a10007-446e-7029-9d46-254776d94b87";
-    let child_path = home.write(
-        &format!(".gemini/antigravity/conversations/{child}.trajectory.json"),
-        &[json!({
-            "cascadeId": child, "agyReader": {"parentCascadeId": ID}
-        })],
+    let child_path = build(format!(".gemini/antigravity/conversations/{child}.db"));
+    stdout(
+        &Command::new("sqlite3")
+            .args(["-init", "/dev/null"])
+            .arg(&child_path)
+            .arg("UPDATE trajectory_metadata_blob SET data = X'2a06706172656e74';")
+            .output()
+            .unwrap(),
     );
     let path = path.to_str().unwrap();
     assert_eq!(
@@ -131,10 +138,15 @@ fn antigravity_exports_are_discoverable_and_keep_step_numbers() {
     assert_eq!(rows[1]["source"]["index"], 3);
     assert_eq!(rows[1]["timestamp"], "2026-01-01T01:01:00Z");
     assert_eq!(rows[1]["text"], "found the duplicate entry");
+    assert_eq!(rows[1]["cwd"], "/tmp/asf project");
+    assert_eq!(rows[1]["source"]["record_id"], "fixture-response");
+    let extra = stdout(&home.run(&["-r", path, "--line", "3", "--tools", "--think"]));
+    assert!(extra.contains("private reasoning") && extra.contains("`read_file`"));
     assert!(stdout(&home.run(&["-p", path, "--line", "3"])).contains("## assistant #3"));
-    assert_eq!(
-        stdout(&home.run(&["-u", path])).trim(),
-        format!("agy --conversation {ID}")
+    let resume = stdout(&home.run(&["-u", path]));
+    assert!(
+        resume.trim().ends_with(&format!("agy --conversation {ID}")),
+        "{resume}"
     );
 }
 

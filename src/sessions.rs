@@ -149,10 +149,7 @@ impl Rows {
 pub fn agent_of(path: &str) -> String {
     let home = home();
     let file = Path::new(path);
-    if agy::id(file).is_some()
-        || file.starts_with(home.join(agy::CLI))
-        || file.starts_with(home.join(agy::IDE))
-    {
+    if file.starts_with(home.join(agy::CLI)) || file.starts_with(home.join(agy::IDE)) {
         return "agy".to_string();
     }
     for (agent, tail) in SOURCES {
@@ -334,7 +331,7 @@ pub fn resume_command(row: &Row) -> String {
     };
     if row.agent == "agy" && (!UUID.is_match(&id) || id.len() != 36) {
         return format!(
-            "# Antigravity export has no valid conversation ID: {}",
+            "# Antigravity session has no valid conversation ID: {}",
             row.path
         );
     }
@@ -503,6 +500,7 @@ where
                     Ok(row) => add(
                         &path,
                         Found {
+                            cwd: row.cwd,
                             title: row.title,
                             line: row.line,
                             sub: row.sub,
@@ -759,35 +757,23 @@ pub fn store_summary(agent: &str, sub: bool) -> String {
         )
     } else {
         let paths = session_files(agent, sub);
+        let modified = if agent == "agy" { agy::modified } else { mtime };
         (
             paths.len(),
             paths
                 .iter()
-                .map(|path| mtime(&path.to_string_lossy()))
+                .map(|path| modified(&path.to_string_lossy()))
                 .reduce(f64::max),
         )
     };
     let unit = match agent {
-        "agy" => "export",
-        "hermes" => "session",
+        "agy" | "hermes" => "session",
         _ => "file",
     };
     let plural = |n| if n == 1 { "" } else { "s" };
     let mut summary = format!("{count} {unit}{}", plural(count));
     if let Some(latest) = latest {
         summary.push_str(&format!("  |  Latest: {}", day(latest, "%Y-%m-%d %H:%M")));
-    }
-    if agent == "agy" {
-        let (native, latest_native) = agy::native_summary();
-        summary.push_str(&format!("  |  {native} native session{}", plural(native)));
-        if latest.is_none()
-            && let Some(at) = latest_native
-        {
-            summary.push_str(&format!(
-                "  |  Latest native: {}",
-                day(at, "%Y-%m-%d %H:%M")
-            ));
-        }
     }
     summary
 }
@@ -809,9 +795,14 @@ pub fn stream_names(
         .iter()
         .filter(|(source, _)| *source != "hermes" && agent.is_none_or(|a| a == *source))
         .flat_map(|(source, _)| {
+            let modified = if *source == "agy" {
+                agy::modified
+            } else {
+                mtime
+            };
             session_files(source, sub).into_iter().map(move |path| {
                 (
-                    mtime(&path.to_string_lossy()),
+                    modified(&path.to_string_lossy()),
                     Candidate::File(source.to_string(), path),
                 )
             })
@@ -1093,7 +1084,11 @@ pub fn preview(path: &str, at: u64) -> Result<String, String> {
     let agent = agent_of(path);
     let mut cwd = String::new();
     let mut title = String::new();
-    let mut at_time = mtime(path);
+    let mut at_time = if agent == "agy" {
+        agy::modified(path)
+    } else {
+        mtime(path)
+    };
     if agent == "hermes"
         && let Some(row) = hermes::session_of(path)
     {
@@ -1110,7 +1105,11 @@ pub fn preview(path: &str, at: u64) -> Result<String, String> {
         }
     });
 
-    let raw = raw_text(path);
+    let raw = if agent == "agy" {
+        String::new()
+    } else {
+        raw_text(path)
+    };
     let files = files_named(&raw);
     let model = if agent == "hermes" {
         hermes::model_of(path)

@@ -256,6 +256,15 @@ impl MetadataIndex {
     }
 
     pub fn refresh(&mut self, path: &Path, agent: &str) -> Vec<Row> {
+        if agent == "agy" {
+            return match crate::agy::session(&path.to_string_lossy()) {
+                Ok(row) => vec![row],
+                Err(error) => {
+                    eprintln!("asf: {error}");
+                    Vec::new()
+                }
+            };
+        }
         let key = path.to_string_lossy().into_owned();
         let stamp = match path.metadata() {
             Ok(metadata) => Stamp::new(&metadata),
@@ -280,7 +289,7 @@ impl MetadataIndex {
                 return Vec::new();
             }
         };
-        let standalone = ["gemini", "opencode", "agy"].contains(&agent);
+        let standalone = ["gemini", "opencode"].contains(&agent);
         let mut entry = match self.entries.get(&key) {
             Some(entry)
                 if !standalone
@@ -321,6 +330,7 @@ impl MetadataIndex {
             .values()
             .filter(|entry| {
                 entry.present
+                    && entry.row.agent != "agy"
                     && entry.row.id == id
                     && !entry.row.path.contains("/subagents/")
                     && agent.is_none_or(|agent| entry.row.agent == agent)
@@ -330,7 +340,9 @@ impl MetadataIndex {
             .collect();
         candidates
             .into_iter()
-            .filter(|(path, _)| Path::new(path).exists())
+            .filter(|(path, source)| {
+                crate::sessions::agent_of(path) == *source && Path::new(path).exists()
+            })
             .flat_map(|(path, source)| self.refresh(Path::new(&path), &source))
             .filter(|row| row.id == id && (sub || !row.sub))
             .map(|row| row.path)
