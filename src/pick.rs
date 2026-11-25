@@ -67,28 +67,52 @@ pub fn pick(source: Box<dyn BufRead + Send>, filters: &str, query: &str, agent: 
             "f{}:reload({me} --rows{filters} -a {agent} -n {ROWS})",
             n + 1
         ));
-        legend.push(format!("f{} {agent}", n + 1));
+        legend.push(format!("F{}  {agent}", n + 1));
     }
     agents.push(format!(
         "f{}:reload({me} --rows{filters} -n {ROWS})",
         SOURCES.len() + 1
     ));
-    legend.push(format!("f{} all", SOURCES.len() + 1));
+    legend.push(format!("F{}  All agents", SOURCES.len() + 1));
+    let filters_list = legend
+        .chunks(3)
+        .map(|row| {
+            format!(
+                "  {}",
+                row.iter()
+                    .map(|item| format!("{item:14}"))
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+                    .trim_end()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let color = !std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty());
+    let (heading, reset) = if color {
+        ("\x1b[1;36m", "\x1b[0m")
+    } else {
+        ("", "")
+    };
     let help = format!(
-        "Picker shortcuts\n\n\
-        Output\n\
-        Enter           Print resume command and close without running it\n\
-        Alt-P           Print transcript path and close\n\
-        Alt-M           Export Markdown to stdout and close\n\n\
-        Search\n\
-        Ctrl-Q          Switch name / transcript search\n\
-        Agent filters: {}\n\n\
-        Navigation\n\
-        Up/Down         Select a session; PgUp/PgDn move by page\n\
-        Ctrl-Up/Down    Scroll transcript preview by page (or Alt-Up/Down)\n\
-        Esc             Close without printing\n\n\
-        Press Enter to return to the picker.",
-        legend.join("  ")
+        "{heading}Picker shortcuts{reset}\n
+{heading}Output{reset}
+  Enter           Print resume command and close without running it
+  Alt-P           Print transcript path and close
+  Alt-M           Export Markdown to stdout and close
+
+{heading}Search{reset}
+  Ctrl-Q          Switch name / transcript search
+
+{heading}Agent filters{reset}
+{filters_list}
+
+{heading}Navigation{reset}
+  Up/Down         Select a session; PgUp/PgDn move by page
+  Shift-Up/Down   Scroll the transcript preview
+  Esc             Close without printing
+
+Press Enter to return to the picker."
     );
 
     let reader = SkimItemReader::new(
@@ -131,20 +155,14 @@ pub fn pick(source: Box<dyn BufRead + Send>, filters: &str, query: &str, agent: 
         preview_window: "down:65%:wrap".to_string(),
         bind: [
             agents,
-            vec![
-                format!(
-                    "?:execute[printf '\\n%s\\n' {} >/dev/tty; IFS= read -r answer </dev/tty]",
-                    shell_arg(&help)
-                ),
-                "alt-down:preview-page-down".to_string(),
-                "alt-up:preview-page-up".to_string(),
-                "ctrl-down:preview-page-down".to_string(),
-                "ctrl-up:preview-page-up".to_string(),
-            ],
+            vec![format!(
+                "?:execute[printf '\\n%s\\n' {} >/dev/tty; IFS= read -r answer </dev/tty]",
+                shell_arg(&help)
+            )],
         ]
         .concat(),
         header: Some(format!(
-            "Output: Enter print resume command | Alt-P print path | Alt-M export Markdown\nSearch: Ctrl-Q switch name/transcript | F1-F{} filter agent (F{} all)\nNavigation: Ctrl-Up/Down scroll preview | Esc close | ? help\n{}",
+            "Output: Enter print resume command | Alt-P print path | Alt-M export Markdown\nSearch: Ctrl-Q switch name/transcript | F1-F{} filter agent (F{} all)\nNavigation: Up/Down select | Shift-Up/Down scroll preview | Esc close | ? help\n{}",
             SOURCES.len(),
             SOURCES.len() + 1,
             header_row()
