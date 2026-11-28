@@ -23,12 +23,17 @@ asf --cwd . -c 'staging directory' --paths
 
 ## Install
 
-From this checkout:
+Download a [prebuilt Linux binary](https://github.com/wassname/asf/releases/latest),
+or install from a checkout with current stable Rust:
 
 ```sh
-cargo +stable install --path . --locked
+cargo install --path . --locked
 ```
 
-To read Hermes or Antigravity sessions, ASF needs the `sqlite3` command.
+On Ubuntu, install `sqlite3` only if you read Hermes or Antigravity sessions:
+
+```sh
+sudo apt install sqlite3
+```
 
 <!-- PI/OpenAI: demo and install instructions. -->
