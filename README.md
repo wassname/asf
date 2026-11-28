@@ -29,8 +29,6 @@ From this checkout:
 cargo +stable install --path . --locked
 ```
 
-Put `~/.cargo/bin` on `PATH`. Hermes and Antigravity need `sqlite3`.
-
-[Research journal](RESEARCH_JOURNAL.md)
+To read Hermes or Antigravity sessions, ASF needs the `sqlite3` command.
 
 <!-- PI/OpenAI: demo and install instructions. -->
