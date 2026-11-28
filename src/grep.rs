@@ -55,14 +55,35 @@ fn single_line(text: &str) -> String {
         .collect()
 }
 
-fn excerpt(text: &str, hit: Option<Match<'_>>, highlight: Option<&Regex>) -> String {
-    let start = hit
-        .and_then(|m| text[..m.start()].char_indices().rev().nth(39))
-        .map_or(0, |(index, _)| index);
-    let end = text[start..]
-        .char_indices()
-        .nth(160)
-        .map_or(text.len(), |(index, _)| start + index);
+fn append_body(out: &mut String, text: &str, multiline: bool) {
+    for ch in text.chars() {
+        match ch {
+            '\n' if multiline => out.push_str("\n  "),
+            '\t' if multiline => out.push(ch),
+            _ if ch.is_control() => out.push(' '),
+            _ => out.push(ch),
+        }
+    }
+}
+
+fn render_body(
+    text: &str,
+    hit: Option<Match<'_>>,
+    highlight: Option<&Regex>,
+    full: bool,
+) -> String {
+    let (start, end) = if full {
+        (0, text.len())
+    } else {
+        let start = hit
+            .and_then(|m| text[..m.start()].char_indices().rev().nth(39))
+            .map_or(0, |(index, _)| index);
+        let end = text[start..]
+            .char_indices()
+            .nth(160)
+            .map_or(text.len(), |(index, _)| start + index);
+        (start, end)
+    };
     let mut out = if start == 0 {
         String::new()
     } else {
@@ -74,18 +95,38 @@ fn excerpt(text: &str, hit: Option<Match<'_>>, highlight: Option<&Regex>) -> Str
             if m.end() <= start || m.is_empty() {
                 continue;
             }
-            out.push_str(&single_line(&text[cursor..m.start().max(start)]));
+            append_body(&mut out, &text[cursor..m.start().max(start)], full);
             out.push_str("\x1b[1;31m");
             cursor = m.end().min(end);
-            out.push_str(&single_line(&text[m.start().max(start)..cursor]));
+            append_body(&mut out, &text[m.start().max(start)..cursor], full);
             out.push_str("\x1b[0m");
         }
     }
-    out.push_str(&single_line(&text[cursor..end]));
+    append_body(&mut out, &text[cursor..end], full);
     if end < text.len() {
         out.push('…');
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn full_context_keeps_long_multiline_messages() {
+        let prefix = "é".repeat(180);
+        let text = format!("{prefix}\n\nTry J-lens\n    final line");
+        let pattern = Regex::new("J-lens").unwrap();
+        assert_eq!(
+            render_body(&text, pattern.find(&text), Some(&pattern), true),
+            format!("{prefix}\n  \n  Try \x1b[1;31mJ-lens\x1b[0m\n      final line")
+        );
+        assert_eq!(
+            render_body(&text, None, None, false),
+            format!("{}…", "é".repeat(160))
+        );
+    }
 }
 
 pub fn run(args: Args) -> i32 {
@@ -189,7 +230,12 @@ pub fn run(args: Args) -> i32 {
                     .iter()
                     .zip(&hits[first.max(printed)..end])
                 {
-                    let body = excerpt(&message.text, *hit, color.then_some(&pattern));
+                    let body = render_body(
+                        &message.text,
+                        *hit,
+                        color.then_some(&pattern),
+                        terminal && context,
+                    );
                     let number = message.number();
                     let role = &message.role;
                     if terminal {
