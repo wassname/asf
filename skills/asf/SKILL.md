@@ -13,7 +13,7 @@ asf --cwd . -c 'staging directory' --paths    # find sessions by transcript text
 
 Start with name search: it matches cached metadata. Add `-c` when the words are in the conversation. `--cwd` matches the exact recorded directory, not its subdirectories, and limits which transcripts `-c` scans. `-c` returns sessions, not individual messages, and includes assistant and tool text. Raise the default limit of 20 sessions with `-n`.
 
-For individual matches, use `grep`. The terminal shows one heading per session; piped output includes `path:record` on every hit. `-B` and `-A` count surrounding messages; `--role` filters hits, not context. Use `--re` for a regex or repeat `--cwd` to search multiple directories.
+For individual matches, use `grep`. The terminal shows a Markdown list labeled `Match` and `Context`; piped output includes `path:record` on every hit. `-B` and `-A` count surrounding messages; `--role` filters hits, not context. Use `--re` for a regex or repeat `--cwd` to search multiple directories.
 
 ```sh
 asf grep --cwd . --role user -B1 -A1 'staging directory'

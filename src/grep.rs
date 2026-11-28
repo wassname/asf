@@ -174,32 +174,45 @@ pub fn run(args: Args) -> i32 {
                     } else {
                         &row.title
                     };
-                    if !title.is_empty() {
-                        writeln!(stdout, "{}", single_line(&clean(title, 72)))?;
-                    }
-                    writeln!(stdout, "{}", row.path)?;
+                    let title = single_line(&clean(title, 72));
+                    let title = if title.is_empty() {
+                        "(untitled)"
+                    } else {
+                        &title
+                    };
+                    writeln!(stdout, "## Session: {title}\n\n`{}`\n", row.path)?;
                 } else if context && matched && (printed == 0 || first > printed) {
-                    writeln!(stdout, "--")?;
+                    writeln!(stdout, "{}", if terminal { "" } else { "--" })?;
                 }
                 matched = true;
                 for (message, hit) in messages[first.max(printed)..end]
                     .iter()
                     .zip(&hits[first.max(printed)..end])
                 {
-                    let date = message
-                        .timestamp
-                        .map_or_else(|| "-".into(), |time| time.to_string());
                     let body = excerpt(&message.text, *hit, color.then_some(&pattern));
-                    let marker = if hit.is_some() { '|' } else { '-' };
-                    if !terminal {
-                        write!(stdout, "{}:", row.path)?;
+                    let number = message.number();
+                    let role = &message.role;
+                    if terminal {
+                        let label = if hit.is_some() {
+                            format!("**Match #{number}**")
+                        } else {
+                            format!("Context #{number}")
+                        };
+                        let time = message
+                            .timestamp
+                            .map_or_else(String::new, |t| format!(", {t}"));
+                        writeln!(stdout, "- {label} ({role}{time}): {body}")?;
+                    } else {
+                        let marker = if hit.is_some() { '|' } else { '-' };
+                        let date = message
+                            .timestamp
+                            .map_or_else(|| "-".into(), |t| t.to_string());
+                        writeln!(
+                            stdout,
+                            "{}:{number} {marker} {date} | {role} | {body}",
+                            row.path
+                        )?;
                     }
-                    writeln!(
-                        stdout,
-                        "{} {marker} {date} | {} | {body}",
-                        message.number(),
-                        message.role
-                    )?;
                 }
                 printed = end;
             }
