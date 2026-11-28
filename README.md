@@ -11,9 +11,8 @@ Press `?` for picker keys or run `asf --help` for command-line options.
 
 ## For agents
 
-The [ASF skill](https://github.com/wassname/skills/blob/main/skills/asf/SKILL.md)
-(private repository) shows how to find and read past sessions. Use ASF’s ripgrep-powered
-search to find transcripts that match a phrase and were recorded in this exact working directory:
+The [ASF skill](skills/asf/SKILL.md) shows how to find and read past sessions.
+To search transcript text with ripgrep and return sessions from this exact working directory:
 
 ```sh
 asf --cwd . -c 'staging directory' --paths
