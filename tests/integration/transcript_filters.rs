@@ -504,6 +504,42 @@ fn cwd_filtering_happens_before_limits_exact_name_stops_and_newest_selection() {
 }
 
 #[test]
+fn grep_reports_each_matching_message_and_merges_context() {
+    let home = Home::new();
+    let dir = home.0.join("project");
+    let other = dir.join("child");
+    let (dir, other) = (dir.to_str().unwrap(), other.to_str().unwrap());
+    let assistant = |text| json!({"type":"message", "message":{"role":"assistant", "content":text}});
+    let path = home.pi("main", ID, dir, &[
+        assistant("J-lens in an earlier turn"),
+        user("a", Some("2026-10-24T00:00:00Z"), "try J-lens twice: J-lens"),
+        assistant("compare directions first"),
+        user("b", None, &format!("{}\nthen try J Lens", "é".repeat(180))),
+        assistant("done"),
+    ]);
+    let child = home.pi("other", "01a10007-446e-7029-9d46-254776d94b87", other, &[
+        user("c", None, "J-lens from a child directory"),
+    ]);
+    let path = path.to_str().unwrap();
+    let args = ["grep", "--cwd", dir, "--role", "user", "--re", "J[- ]lens"];
+    let hits = stdout(&home.run(&args));
+    assert_eq!(hits.lines().count(), 2, "{hits}");
+    assert!(hits.contains(&format!("{path}:3 | 2026-10-24T00:00:00Z | user | try J-lens twice: J-lens")));
+    assert!(hits.contains("then try J Lens"));
+    assert!(!hits.contains('\x1b'));
+    let context = stdout(&home.run(&[&args[..], &["-A1", "-B1", "--color", "always"]].concat()));
+    assert_eq!(context.lines().count(), 5, "{context}");
+    assert!(context.contains(&format!("{path}:2 - - | assistant | J-lens")));
+    assert_eq!(context.matches("compare directions first").count(), 1);
+    assert_eq!(context.matches("\x1b[1;31m").count(), 3);
+    let both = stdout(&home.run(&[&args[..], &["--cwd", other]].concat()));
+    assert!(both.contains(child.to_str().unwrap()));
+    assert!(stdout(&home.run(&["-r", path, "--around", "3"])).contains("## user #3"));
+    assert_eq!(home.run(&["grep", "--cwd", dir, "never said"]).status.code(), Some(1));
+    assert_eq!(home.run(&["grep", "--re", "("]).status.code(), Some(2));
+}
+
+#[test]
 fn cwd_matches_symlinks_but_not_project_path_prefixes() {
     let home = Home::new();
     let project = home.0.join("project");

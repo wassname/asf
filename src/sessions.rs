@@ -890,7 +890,7 @@ fn recorded_cwd(path: &Path, opening: &regex::Regex, header: Option<&regex::Rege
     None
 }
 
-fn scoped_content_paths(
+fn scoped_session_files(
     agent: &str,
     sub: bool,
     cache: &MetadataIndex,
@@ -909,14 +909,6 @@ fn scoped_content_paths(
                     in_cwd,
                 )
             })
-            .flat_map(|path| {
-                let shards = opencode_messages(&path.to_string_lossy());
-                std::iter::once(path).chain(
-                    shards.into_iter().flat_map(|(message, parts)| {
-                        std::iter::once(message).chain(parts)
-                    }),
-                )
-            })
             .collect();
     }
     let (_, opening, header) = NAME_PATTERNS.iter().find(|(a, _, _)| *a == agent).unwrap();
@@ -933,6 +925,70 @@ fn scoped_content_paths(
                 )
         })
         .collect()
+}
+
+fn content_files(path: PathBuf, agent: &str) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    if agent == "opencode" {
+        for (message, parts) in opencode_messages(&path.to_string_lossy()) {
+            files.push(message);
+            files.extend(parts);
+        }
+    }
+    files.push(path);
+    files
+}
+
+// Collect paths before parsing any message bodies. -- PI/OpenAI
+pub fn visit_transcripts(
+    agent: Option<&str>,
+    sub: bool,
+    in_cwd: Option<&dyn Fn(&str) -> bool>,
+    mut visit: impl FnMut(&Row) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    let cache = MetadataIndex::load();
+    let mut candidates = Vec::new();
+    for (source, _) in SOURCES {
+        if agent.is_some_and(|a| a != source) {
+            continue;
+        }
+        if source == "hermes" || source == "agy" {
+            let rows = if source == "hermes" {
+                hermes::sessions()
+            } else {
+                agy::paths()
+                    .into_iter()
+                    .filter_map(|path| agy::session_metadata(path.to_str()?).ok())
+                    .collect()
+            };
+            candidates.extend(rows.into_iter().filter(|row| {
+                (sub || !row.sub) && in_cwd.is_none_or(|matches| matches(&row.cwd))
+            }));
+        } else {
+            let files = in_cwd.map_or_else(
+                || session_files(source, sub),
+                |matches| scoped_session_files(source, sub, &cache, matches),
+            );
+            candidates.extend(files.into_iter().map(|file| {
+                let path = file.to_string_lossy().into_owned();
+                Row {
+                    mtime: mtime(&path),
+                    path,
+                    agent: source.to_owned(),
+                    sub: file.components().any(|part| part.as_os_str() == "subagents"),
+                    ..Row::default()
+                }
+            }));
+        }
+    }
+    if !sub {
+        mark_subagents(&mut candidates);
+    }
+    candidates.sort_by(|a, b| b.mtime.total_cmp(&a.mtime).then(a.path.cmp(&b.path)));
+    for row in candidates.iter().filter(|row| sub || !row.sub) {
+        visit(row)?;
+    }
+    Ok(())
 }
 
 /// One row per matching session, at its first hit.
@@ -973,7 +1029,11 @@ pub fn search_content(
             .filter(|(a, _)| {
                 !["hermes", "agy"].contains(a) && agent.is_none_or(|source| source == *a)
             })
-            .flat_map(|(a, _)| scoped_content_paths(a, sub, &cache, in_cwd))
+            .flat_map(|(a, _)| {
+                scoped_session_files(a, sub, &cache, in_cwd)
+                    .into_iter()
+                    .flat_map(|path| content_files(path, a))
+            })
             .collect();
         scan(&paths, 1)
     } else {

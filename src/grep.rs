@@ -1,0 +1,197 @@
+//! Message search with source record numbers and surrounding turns. -- PI/OpenAI
+
+use crate::{Role, matches_directory, normalize_path, record::Show, sessions, transcript};
+use regex::{Match, Regex, RegexBuilder};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::io::{self, IsTerminal, Write};
+use std::path::PathBuf;
+
+#[derive(clap::Args)]
+pub struct Args {
+    /// Literal text to find (case insensitive).
+    #[arg(required = true)]
+    query: Vec<String>,
+    /// Treat the query as a regular expression.
+    #[arg(long = "re")]
+    regex: bool,
+    /// Search sessions recorded in this exact directory; repeat for multiple directories.
+    #[arg(long, value_parser = normalize_path)]
+    cwd: Vec<PathBuf>,
+    /// Only match messages with this role; context may include other roles.
+    #[arg(long, value_enum)]
+    role: Option<Role>,
+    /// Only search this agent's sessions.
+    #[arg(short, long)]
+    agent: Option<String>,
+    /// Include subagent sessions.
+    #[arg(long)]
+    sub: bool,
+    /// Show N messages before each hit.
+    #[arg(short = 'B', long = "before-context", default_value_t = 0)]
+    before: usize,
+    /// Show N messages after each hit.
+    #[arg(short = 'A', long = "after-context", default_value_t = 0)]
+    after: usize,
+    /// Highlight matching text on a terminal by default.
+    #[arg(long, value_enum, default_value = "auto")]
+    color: Color,
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum Color {
+    Auto,
+    Always,
+    Never,
+}
+
+fn single_line(text: &str) -> String {
+    text.chars()
+        .map(|ch| if ch.is_control() { ' ' } else { ch })
+        .collect()
+}
+
+fn excerpt(text: &str, hit: Option<Match<'_>>, highlight: Option<&Regex>) -> String {
+    let start = hit
+        .and_then(|m| text[..m.start()].char_indices().rev().nth(39))
+        .map_or(0, |(index, _)| index);
+    let end = text[start..]
+        .char_indices()
+        .nth(160)
+        .map_or(text.len(), |(index, _)| start + index);
+    let mut out = if start == 0 {
+        String::new()
+    } else {
+        "…".into()
+    };
+    let mut cursor = start;
+    if let Some(pattern) = highlight.filter(|_| hit.is_some()) {
+        for m in pattern.find_iter(text).take_while(|m| m.start() < end) {
+            if m.end() <= start || m.is_empty() {
+                continue;
+            }
+            out.push_str(&single_line(&text[cursor..m.start().max(start)]));
+            out.push_str("\x1b[1;31m");
+            cursor = m.end().min(end);
+            out.push_str(&single_line(&text[m.start().max(start)..cursor]));
+            out.push_str("\x1b[0m");
+        }
+    }
+    out.push_str(&single_line(&text[cursor..end]));
+    if end < text.len() {
+        out.push('…');
+    }
+    out
+}
+
+pub fn run(args: Args) -> i32 {
+    if let Some(agent) = &args.agent
+        && !sessions::SOURCES.iter().any(|(source, _)| source == agent)
+    {
+        eprintln!("asf: no such agent {agent:?}");
+        return 2;
+    }
+    let query = args.query.join(" ");
+    if query.is_empty() {
+        eprintln!("asf grep: provide a nonempty pattern");
+        return 2;
+    }
+    let wanted = if args.regex {
+        query
+    } else {
+        regex::escape(&query)
+    };
+    let pattern = match RegexBuilder::new(&wanted).case_insensitive(true).build() {
+        Ok(pattern) => pattern,
+        Err(error) => {
+            eprintln!("asf grep: {error}");
+            return 2;
+        }
+    };
+    let checked = RefCell::new(HashMap::new());
+    let in_cwd = |recorded: &str| {
+        *checked
+            .borrow_mut()
+            .entry(recorded.to_owned())
+            .or_insert_with(|| args.cwd.iter().any(|cwd| matches_directory(recorded, cwd)))
+    };
+    let color = match args.color {
+        Color::Always => true,
+        Color::Never => false,
+        Color::Auto => io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none(),
+    };
+    let show = Show {
+        tools: matches!(args.role, Some(Role::Tool)),
+        think: false,
+    };
+    let mut stdout = io::stdout().lock();
+    let mut matched = false;
+    let mut failed = false;
+    let context = args.before > 0 || args.after > 0;
+    let result = sessions::visit_transcripts(
+        args.agent.as_deref(),
+        args.sub,
+        (!args.cwd.is_empty()).then_some(&in_cwd),
+        |row| {
+            let messages = match transcript::messages_in(row, 0, show) {
+                Ok(messages) => messages,
+                Err(error) => {
+                    eprintln!("asf grep: {error}");
+                    failed = true;
+                    return Ok(());
+                }
+            };
+            let hits: Vec<_> = messages
+                .iter()
+                .map(|message| {
+                    args.role
+                        .is_none_or(|role| role.as_str() == message.role)
+                        .then(|| pattern.find(&message.text))
+                        .flatten()
+                })
+                .collect();
+            let mut printed = 0;
+            for (index, _) in hits.iter().enumerate().filter(|(_, hit)| hit.is_some()) {
+                let first = index.saturating_sub(args.before);
+                let end = index
+                    .saturating_add(args.after)
+                    .saturating_add(1)
+                    .min(messages.len());
+                if context && matched && (printed == 0 || first > printed) {
+                    writeln!(stdout, "--")?;
+                }
+                matched = true;
+                for (message, hit) in messages[first.max(printed)..end]
+                    .iter()
+                    .zip(&hits[first.max(printed)..end])
+                {
+                    let date = message
+                        .timestamp
+                        .map_or_else(|| "-".into(), |time| time.to_string());
+                    let body = excerpt(&message.text, *hit, color.then_some(&pattern));
+                    let marker = if hit.is_some() { '|' } else { '-' };
+                    writeln!(
+                        stdout,
+                        "{}:{} {marker} {date} | {} | {body}",
+                        row.path,
+                        message.number(),
+                        message.role
+                    )?;
+                }
+                printed = end;
+            }
+            Ok(())
+        },
+    );
+    if let Err(error) = result {
+        eprintln!("asf grep: {error}");
+        failed = true;
+    }
+    if failed {
+        2
+    } else if matched {
+        0
+    } else {
+        1
+    }
+}

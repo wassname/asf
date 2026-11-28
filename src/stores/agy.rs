@@ -122,6 +122,10 @@ fn file_uri(value: &[u8]) -> Option<String> {
     String::from_utf8(decoded).ok()
 }
 
+pub fn session_metadata(path: &str) -> Result<Row, String> {
+    load(path, "0").map(|(row, _)| row)
+}
+
 pub fn session(path: &str) -> Result<Row, String> {
     collect(path, 0, Show::default(), true).map(|(row, _)| row)
 }
@@ -168,7 +172,7 @@ pub fn search_content(
         .filter_map(|path| {
             let path = path.to_str()?;
             if let Some(in_cwd) = in_cwd
-                && !load(path, "0").is_ok_and(|(row, _)| in_cwd(&row.cwd))
+                && !session_metadata(path).is_ok_and(|row| in_cwd(&row.cwd))
             {
                 return None;
             }

@@ -191,9 +191,16 @@ pub fn messages(path: &str, at: u64, show: Show) -> Result<Vec<Message>, String>
     if sessions::agent_of(path) == "agy" {
         return crate::agy::conversation(path, at, show).map(|(_, messages)| messages);
     }
-    let session = context(path);
+    messages_in(&context(path), at, show)
+}
+
+pub fn messages_in(session: &Row, at: u64, show: Show) -> Result<Vec<Message>, String> {
+    let path = session.path.as_str();
+    if session.agent == "agy" {
+        return crate::agy::conversation(path, at, show).map(|(_, messages)| messages);
+    }
     if session.agent == "hermes" {
-        return Ok(crate::hermes::messages(&session, show));
+        return Ok(crate::hermes::messages(session, show));
     }
     if session.agent == "opencode" {
         let mut messages = Vec::new();
@@ -208,7 +215,7 @@ pub fn messages(path: &str, at: u64, show: Show) -> Result<Vec<Message>, String>
                 .collect();
             if !said.is_empty() {
                 messages.push(Message::new(
-                    &session,
+                    session,
                     message_time(&entry, "opencode"),
                     entry["role"].as_str().unwrap_or("?").to_string(),
                     said.join("\n"),
@@ -242,7 +249,7 @@ pub fn messages(path: &str, at: u64, show: Show) -> Result<Vec<Message>, String>
     {
         let root: Value =
             serde_json::from_reader(reader).map_err(|error| format!("{path}: {error}"))?;
-        let mut session = session;
+        let mut session = session.clone();
         if let Some(id) = root.get("sessionId").and_then(Value::as_str) {
             session.id = id.to_string();
         }
@@ -269,7 +276,7 @@ pub fn messages(path: &str, at: u64, show: Show) -> Result<Vec<Message>, String>
             record_id: record_id(&entry, &session.agent),
             parts: Vec::new(),
         };
-        let Some(message) = normalize(&entry, &session, source, at != 0, show) else {
+        let Some(message) = normalize(&entry, session, source, at != 0, show) else {
             continue;
         };
         messages.push(message);

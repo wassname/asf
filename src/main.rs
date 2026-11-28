@@ -8,6 +8,7 @@
 //!     asf --paths -c steer     just the transcript paths, for piping
 //!
 
+mod grep;
 mod metadata;
 mod pick;
 mod record;
@@ -48,10 +49,12 @@ impl Role {
 #[command(
     name = "asf",
     about = "Find a past coding-agent session by name, or by anything said inside it",
+    args_conflicts_with_subcommands = true,
     after_help = "\
 Examples:
   asf lucid                  list sessions whose name, project or first message says lucid
-  asf -c \"staging dir\"       search everything said in each session, not only the name
+  asf -c \"staging dir\"       list sessions matching transcript text
+  asf grep --cwd . -B1 -A1 \"staging dir\"   show matching messages and their neighbors
   asf lucid -r --tail 40     read the newest match as markdown, last 40 messages
   asf -r 019ffeb2            read by session id, a prefix is enough
   asf -r <file.jsonl>        read by transcript path
@@ -90,6 +93,8 @@ at all, which takes the newest session the query matched: `asf lucid -r`.
 The picker prints its own keys. README.md and RESEARCH_JOURNAL.md have the rest."
 )]
 struct Args {
+    #[command(subcommand)]
+    command: Option<Command>,
     /// words to look for. Empty lists the newest sessions.
     query: Vec<String>,
     /// search the whole transcript, not the name
@@ -163,6 +168,12 @@ struct Args {
     /// show message N and the visible message before and after it
     #[arg(long, value_name = "N", requires = "read", conflicts_with_all = ["role", "since", "until", "head", "tail", "line", "jsonl"], value_parser = clap::value_parser!(u64).range(1..))]
     around: Option<u64>,
+}
+
+#[derive(clap::Subcommand)]
+enum Command {
+    /// Show matching messages and their source locations.
+    Grep(grep::Args),
 }
 
 fn parse_time(value: &str) -> Result<jiff::Timestamp, String> {
@@ -430,6 +441,9 @@ fn one(args: &Args, path: &str) -> ! {
 fn main() {
     unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) }; // let `| head` close the pipe quietly
     let args = Args::parse();
+    if let Some(Command::Grep(args)) = args.command {
+        std::process::exit(grep::run(args));
+    }
     if args
         .since
         .zip(args.until)

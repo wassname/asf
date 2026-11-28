@@ -18,7 +18,13 @@ To search transcript text with ripgrep and return sessions from this exact worki
 asf --cwd . -c 'staging directory' --paths
 ```
 
-<!-- PI/OpenAI: skill link and working-directory search example. -->
+For matching messages instead of sessions, use `asf grep`:
+
+```sh
+asf grep --cwd . --role user -B1 -A1 'staging directory'
+```
+
+<!-- PI/OpenAI: skill link and working-directory search examples. -->
 
 ## Install
 
