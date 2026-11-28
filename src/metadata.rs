@@ -251,10 +251,14 @@ impl MetadataIndex {
         }
     }
 
-    pub fn cached_cwd(&self, path: &Path) -> Option<&str> {
+    pub fn cached_row(&self, path: &Path) -> Option<&Row> {
         let entry = self.entries.get(path.to_str()?)?;
-        (entry.present && entry.stamp == Stamp::new(&path.metadata().ok()?))
-            .then_some(entry.row.cwd.as_str())
+        (entry.present && entry.stamp == Stamp::new(&path.metadata().ok()?)).then_some(&entry.row)
+    }
+
+    pub fn cached_cwd(&self, path: &Path) -> Option<&str> {
+        self.cached_row(path)
+            .map(|row| row.cwd.as_str())
             .filter(|cwd| !cwd.is_empty())
     }
 

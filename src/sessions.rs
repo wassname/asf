@@ -975,6 +975,7 @@ pub fn visit_transcripts(
                     mtime: mtime(&path),
                     path,
                     agent: source.to_owned(),
+                    title: cache.cached_row(&file).map_or_else(String::new, |row| row.title.clone()),
                     sub: file.components().any(|part| part.as_os_str() == "subagents"),
                     ..Row::default()
                 }

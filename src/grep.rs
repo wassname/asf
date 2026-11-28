@@ -1,6 +1,10 @@
 //! Message search with source record numbers and surrounding turns. -- PI/OpenAI
 
-use crate::{Role, matches_directory, normalize_path, record::Show, sessions, transcript};
+use crate::{
+    Role, matches_directory, normalize_path,
+    record::{Show, clean},
+    sessions, transcript,
+};
 use regex::{Match, Regex, RegexBuilder};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -115,10 +119,11 @@ pub fn run(args: Args) -> i32 {
             .entry(recorded.to_owned())
             .or_insert_with(|| args.cwd.iter().any(|cwd| matches_directory(recorded, cwd)))
     };
+    let terminal = io::stdout().is_terminal();
     let color = match args.color {
         Color::Always => true,
         Color::Never => false,
-        Color::Auto => io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none(),
+        Color::Auto => terminal && std::env::var_os("NO_COLOR").is_none(),
     };
     let show = Show {
         tools: matches!(args.role, Some(Role::Tool)),
@@ -157,7 +162,23 @@ pub fn run(args: Args) -> i32 {
                     .saturating_add(args.after)
                     .saturating_add(1)
                     .min(messages.len());
-                if context && matched && (printed == 0 || first > printed) {
+                if terminal && printed == 0 {
+                    if matched {
+                        writeln!(stdout)?;
+                    }
+                    let title = if row.title.is_empty() {
+                        messages
+                            .iter()
+                            .find(|m| m.role == "user")
+                            .map_or("", |m| &m.text)
+                    } else {
+                        &row.title
+                    };
+                    if !title.is_empty() {
+                        writeln!(stdout, "{}", single_line(&clean(title, 72)))?;
+                    }
+                    writeln!(stdout, "{}", row.path)?;
+                } else if context && matched && (printed == 0 || first > printed) {
                     writeln!(stdout, "--")?;
                 }
                 matched = true;
@@ -170,10 +191,12 @@ pub fn run(args: Args) -> i32 {
                         .map_or_else(|| "-".into(), |time| time.to_string());
                     let body = excerpt(&message.text, *hit, color.then_some(&pattern));
                     let marker = if hit.is_some() { '|' } else { '-' };
+                    if !terminal {
+                        write!(stdout, "{}:", row.path)?;
+                    }
                     writeln!(
                         stdout,
-                        "{}:{} {marker} {date} | {} | {body}",
-                        row.path,
+                        "{} {marker} {date} | {} | {body}",
                         message.number(),
                         message.role
                     )?;
