@@ -11,7 +11,7 @@ asf --cwd . --paths                          # list sessions recorded in this di
 asf --cwd . -c 'staging directory' --paths    # find sessions by transcript text
 ```
 
-`--cwd` matches the exact recorded working directory, not its subdirectories. The default limit is 20 sessions; raise it with `-n`. `-c` returns sessions, not individual messages, and searches assistant and tool text too.
+Start with name search: it matches cached metadata. Add `-c` when the words are in the conversation. `--cwd` matches the exact recorded directory, not its subdirectories, and limits which transcripts `-c` scans. `-c` returns sessions, not individual messages, and includes assistant and tool text. Raise the default limit of 20 sessions with `-n`.
 
 Use a transcript path or session ID in place of `SESSION`:
 

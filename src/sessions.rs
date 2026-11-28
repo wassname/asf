@@ -772,6 +772,13 @@ pub fn stream_names(
         Hermes(Row),
     }
     let mut cache = MetadataIndex::load();
+    let pattern = (!query.is_empty()).then(|| {
+        let wanted = if regex { query.into() } else { regex::escape(query) };
+        regex::RegexBuilder::new(&wanted)
+            .case_insensitive(true)
+            .build()
+            .expect("bad query")
+    });
     let mut files: Vec<(f64, Candidate)> = SOURCES
         .iter()
         .filter(|(source, _)| *source != "hermes" && agent.is_none_or(|a| a == *source))
@@ -797,7 +804,6 @@ pub fn stream_names(
         );
     }
     files.sort_by(|a, b| b.0.total_cmp(&a.0));
-    let mut indexed_rows = Vec::new();
     for (changed, candidate) in files {
         if stop.load(Ordering::Relaxed) {
             return;
@@ -818,17 +824,19 @@ pub fn stream_names(
                         .to_string();
                 }
             }
-            if sub || !row.sub {
-                if row.id.is_empty() {
-                    row.id = session_id(&row.path, &row.agent);
-                }
-                indexed_rows.push(row);
+            if !sub && row.sub {
+                continue;
             }
-        }
-    }
-    for row in cache.search(indexed_rows, query, regex) {
-        if stop.load(Ordering::Relaxed) || !send(row) {
-            return;
+            if row.id.is_empty() {
+                row.id = session_id(&row.path, &row.agent);
+            }
+            if pattern.as_ref().is_none_or(|pattern| {
+                [&row.id, &row.title, &row.cwd, &row.opening, &row.path]
+                    .into_iter()
+                    .any(|field| pattern.is_match(field))
+            }) && !send(row) {
+                return;
+            }
         }
     }
 }
@@ -865,8 +873,76 @@ fn opencode_sessions() -> HashMap<String, String> {
         .collect()
 }
 
-/// Search every store. One row per session, at its first hit.
-pub fn search_content(query: &str, regex: bool, agent: Option<&str>) -> Vec<Row> {
+// Read only far enough to find the header or first user record. -- PI/OpenAI
+fn recorded_cwd(path: &Path, opening: &regex::Regex, header: Option<&regex::Regex>) -> Option<String> {
+    let file = std::fs::File::open(path).ok()?;
+    for line in BufReader::new(file).lines().map_while(Result::ok) {
+        let is_opening = opening.is_match(&line);
+        if !is_opening && !header.is_some_and(|pattern| pattern.is_match(&line)) {
+            continue;
+        }
+        let Some(entry) = parse(&line) else { continue };
+        let cwd = find_value(&entry, "cwd");
+        if is_opening || !cwd.is_empty() {
+            return Some(cwd);
+        }
+    }
+    None
+}
+
+fn scoped_content_paths(
+    agent: &str,
+    sub: bool,
+    cache: &MetadataIndex,
+    in_cwd: &dyn Fn(&str) -> bool,
+) -> Vec<PathBuf> {
+    let files = session_files(agent, sub);
+    if agent == "opencode" {
+        return files
+            .into_iter()
+            .filter(|path| {
+                cache.cached_cwd(path).map_or_else(
+                    || {
+                        read_json(path)
+                            .is_some_and(|entry| entry["directory"].as_str().is_some_and(in_cwd))
+                    },
+                    in_cwd,
+                )
+            })
+            .flat_map(|path| {
+                let shards = opencode_messages(&path.to_string_lossy());
+                std::iter::once(path).chain(
+                    shards.into_iter().flat_map(|(message, parts)| {
+                        std::iter::once(message).chain(parts)
+                    }),
+                )
+            })
+            .collect();
+    }
+    let (_, opening, header) = NAME_PATTERNS.iter().find(|(a, _, _)| *a == agent).unwrap();
+    let opening = regex::Regex::new(opening).unwrap();
+    let header = (!header.is_empty()).then(|| regex::Regex::new(header).unwrap());
+    files
+        .into_iter()
+        .filter(|path| {
+            // Legacy Gemini logs have a project hash, not a recorded working directory.
+            !(agent == "gemini" && path.ends_with("logs.json"))
+                && cache.cached_cwd(path).map_or_else(
+                    || recorded_cwd(path, &opening, header.as_ref()).is_some_and(|cwd| in_cwd(&cwd)),
+                    in_cwd,
+                )
+        })
+        .collect()
+}
+
+/// One row per matching session, at its first hit.
+pub fn search_content(
+    query: &str,
+    regex: bool,
+    agent: Option<&str>,
+    sub: bool,
+    in_cwd: Option<&dyn Fn(&str) -> bool>,
+) -> Vec<Row> {
     let roots: Vec<PathBuf> = SOURCES
         .iter()
         .filter(|(a, _)| {
@@ -874,6 +950,10 @@ pub fn search_content(query: &str, regex: bool, agent: Option<&str>) -> Vec<Row>
         })
         .map(|(a, _)| store(a))
         .collect();
+    let mut globs = scan::CONTENT_GLOBS.to_vec();
+    if !sub {
+        globs.push("!**/subagents/**");
+    }
     let scan = |paths: &[PathBuf], max_count: usize| -> Hits {
         scan::search(
             query,
@@ -881,13 +961,25 @@ pub fn search_content(query: &str, regex: bool, agent: Option<&str>) -> Vec<Row>
             &Scan {
                 literal: !regex,
                 icase: true,
-                globs: &scan::CONTENT_GLOBS,
+                globs: &globs,
                 max_count,
             },
         )
     };
-    let mut hits = scan(&roots, 1);
-    if agent.is_none_or(|a| a == "copilot") {
+    let mut hits = if let Some(in_cwd) = in_cwd {
+        let cache = MetadataIndex::load();
+        let paths: Vec<_> = SOURCES
+            .iter()
+            .filter(|(a, _)| {
+                !["hermes", "agy"].contains(a) && agent.is_none_or(|source| source == *a)
+            })
+            .flat_map(|(a, _)| scoped_content_paths(a, sub, &cache, in_cwd))
+            .collect();
+        scan(&paths, 1)
+    } else {
+        scan(&roots, 1)
+    };
+    if in_cwd.is_none() && agent.is_none_or(|a| a == "copilot") {
         let events: Vec<_> = scan::session_files(&store("copilot"), 2)
             .into_iter()
             .filter(|p| p.ends_with("events.jsonl"))
@@ -955,10 +1047,10 @@ pub fn search_content(query: &str, regex: bool, agent: Option<&str>) -> Vec<Row>
     };
     if let Ok(pattern) = regex::Regex::new(&format!("(?i){wanted}")) {
         if agent.is_none_or(|a| a == "hermes") {
-            rows.extend(hermes::search_content(&pattern, query));
+            rows.extend(hermes::search_content(&pattern, query, in_cwd));
         }
         if agent.is_none_or(|a| a == "agy") {
-            rows.extend(agy::search_content(&pattern, query));
+            rows.extend(agy::search_content(&pattern, query, in_cwd));
         }
     }
     rows
@@ -1039,24 +1131,19 @@ pub(crate) fn opencode_messages(session_json: &str) -> Vec<(PathBuf, Vec<PathBuf
         .collect()
 }
 
-/// Mark the runs an agent started for itself. Name mode learns this while it reads the
-/// headers; content mode never reads them, so it asks here, by the same rules.
+/// Content hits need only the session header to decide whether to hide subagents. -- PI/OpenAI
 pub fn mark_subagents(rows: &mut [Row]) {
-    let mut by_agent: Vec<(String, Vec<PathBuf>)> = Vec::new();
-    for row in rows.iter().filter(|row| row.agent != "agy") {
-        match by_agent.iter_mut().find(|(a, _)| *a == row.agent) {
-            Some((_, paths)) => paths.push(PathBuf::from(&row.path)),
-            None => by_agent.push((row.agent.clone(), vec![PathBuf::from(&row.path)])),
-        }
-    }
-    let mut sub: Vec<String> = Vec::new();
-    name_sessions(&by_agent, |path, found| {
-        if found.sub {
-            sub.push(path.to_string());
-        }
-    });
-    for row in rows.iter_mut() {
-        row.sub |= sub.contains(&row.path);
+    for row in rows.iter_mut().filter(|row| !row.sub) {
+        row.sub = match row.agent.as_str() {
+            "pi" => first_record(&row.path).is_some_and(|header| {
+                header["type"] == "session" && !UUID.is_match(&find_value(&header, "id"))
+            }),
+            "codex" | "copilot" => first_record(&row.path)
+                .is_some_and(|header| header.to_string().contains(r#""subagent""#)),
+            "opencode" => read_json(Path::new(&row.path))
+                .is_some_and(|header| header.get("parentID").is_some()),
+            _ => false,
+        };
     }
 }
 

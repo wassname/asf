@@ -60,14 +60,18 @@ fn names_are_cached_recent_first_and_refreshed_after_renaming() {
         serde_json::from_slice(&std::fs::read(&cache_path).unwrap()).unwrap();
     assert!(cache.get(recent.to_str().unwrap()).is_some());
     assert!(
-        cache.get(old.to_str().unwrap()).is_some(),
-        "the first lookup must populate all metadata"
+        cache.get(old.to_str().unwrap()).is_none(),
+        "a limited lookup should not read older transcripts"
     );
 
     assert_eq!(
         run(&home, &["recent name", "--paths"]).trim(),
         recent.to_str().unwrap()
     );
+    let cache: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&cache_path).unwrap()).unwrap();
+    assert!(cache.get(old.to_str().unwrap()).is_none());
+    assert!(run(&home, &["--refresh", "-a", "pi"]).contains("2 sessions"));
     let cache: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&cache_path).unwrap()).unwrap();
     assert!(cache.get(old.to_str().unwrap()).is_some());

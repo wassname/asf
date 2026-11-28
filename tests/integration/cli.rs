@@ -105,6 +105,12 @@ fn a_content_search_reads_the_whole_transcript() {
     assert!(out.contains("| pi "), "{out}");
     assert!(out.contains("1 sessions matched"), "{out}");
     assert!(asf(&["-c", "widget"]).contains("8 sessions matched"));
+    let scoped = asf(&["--cwd", "/tmp/asf-fixture-repo", "-c", "widget", "--paths"]);
+    for agent in ["pi", "claude", "codex", "opencode", "copilot"] {
+        let path = path_of(agent);
+        assert!(scoped.lines().any(|row| row == path), "{agent}: {scoped}");
+    }
+    assert!(!scoped.contains("logs.json"), "{scoped}");
 }
 
 /// a run an agent started for itself cannot be resumed, so it is hidden unless asked for
@@ -120,6 +126,9 @@ fn subagent_runs_are_hidden() {
     // content mode learns it from the header separately
     assert!(asf(&["-c", "widget"]).contains("8 sessions matched"));
     assert!(asf(&["--sub", "-c", "widget"]).contains("12 sessions matched"));
+    let args = ["--cwd", "/tmp/asf-fixture-repo", "-a", "claude", "-c", "widget", "--paths"];
+    assert!(!asf(&args).contains("/subagents/"));
+    assert!(asf(&[&args[..], &["--sub"]].concat()).contains("/subagents/"));
 }
 
 #[test]

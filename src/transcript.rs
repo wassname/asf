@@ -254,7 +254,8 @@ pub fn messages(path: &str, at: u64, show: Show) -> Result<Vec<Message>, String>
     }
 
     let mut messages: Vec<Message> = Vec::new();
-    for (index, line) in reader.lines().enumerate() {
+    let end = if at == 0 { usize::MAX } else { at as usize };
+    for (index, line) in reader.lines().take(end).enumerate() {
         let number = index as u64 + 1;
         if at != 0 && at != number {
             continue;

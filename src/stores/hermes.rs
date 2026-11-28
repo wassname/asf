@@ -65,13 +65,17 @@ fn text(row: &Value, key: &str) -> String {
 
 /// Every hermes session. The name it was given, else the first thing you said to it.
 pub fn sessions() -> Vec<Row> {
-    let sql = "select s.id, coalesce(nullif(s.title,''), nullif(s.display_name,''), '') as name,
+    sessions_where("")
+}
+
+fn sessions_where(filter: &str) -> Vec<Row> {
+    let sql = format!("select s.id, coalesce(nullif(s.title,''), nullif(s.display_name,''), '') as name,
         coalesce(s.cwd, '') as cwd, coalesce(s.ended_at, s.started_at) as at,
         coalesce(s.parent_session_id, '') as parent,
         coalesce((select m.content from messages m where m.session_id = s.id
                   and m.role = 'user' order by m.timestamp limit 1), '') as opening
-        from sessions s";
-    query(sql)
+        from sessions s {filter}");
+    query(&sql)
         .iter()
         .map(|row| {
             let opening = clean(&text(row, "opening"), 110);
@@ -111,12 +115,27 @@ pub fn session_of(path: &str) -> Option<Row> {
     sessions().into_iter().find(|row| row.path == path)
 }
 
-/// Sessions whose messages match. 500 kB of text in the whole table, so read it all and let
-/// the same regex decide, instead of teaching SQL about the query.
-pub fn search_content(pattern: &regex::Regex, query_text: &str) -> Vec<Row> {
-    let said = query(
-        "select session_id, content from messages where content is not null order by timestamp",
-    );
+/// Select sessions before reading their messages; regex matching stays in Rust. -- PI/OpenAI
+pub fn search_content(
+    pattern: &regex::Regex,
+    query_text: &str,
+    in_cwd: Option<&dyn Fn(&str) -> bool>,
+) -> Vec<Row> {
+    let ids = in_cwd.map(|matches| {
+        query("select id, cwd from sessions")
+            .iter()
+            .filter(|row| row["cwd"].as_str().is_some_and(matches))
+            .map(|row| format!("'{}'", text(row, "id").replace('\'', "''")))
+            .collect::<Vec<_>>()
+            .join(",")
+    });
+    if ids.as_deref() == Some("") {
+        return Vec::new();
+    }
+    let filter = ids.as_ref().map_or(String::new(), |ids| format!("and session_id in ({ids})"));
+    let said = query(&format!(
+        "select session_id, content from messages where content is not null {filter} order by timestamp"
+    ));
     let mut hit: Vec<(String, String)> = Vec::new();
     for row in &said {
         let content = text(row, "content");
@@ -127,7 +146,10 @@ pub fn search_content(pattern: &regex::Regex, query_text: &str) -> Vec<Row> {
             }
         }
     }
-    let mut rows = sessions();
+    let mut rows = match ids {
+        Some(ids) => sessions_where(&format!("where s.id in ({ids})")),
+        None => sessions(),
+    };
     rows.retain(|row| hit.iter().any(|(id, _)| path_of(id) == row.path));
     for row in rows.iter_mut() {
         let (_, said) = hit.iter().find(|(id, _)| path_of(id) == row.path).unwrap();

@@ -2,12 +2,8 @@
 
 use crate::record::{UUID, clean, find_value, is_junk, parse, role_of, texts};
 use crate::sessions::{Row, session_id};
-use fff_search::{
-    Casing, FFFMode, FFFQuery, FilePicker, FilePickerOptions, FuzzyQuery, GrepMode,
-    GrepSearchOptions,
-};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs::{File, Metadata};
 use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
@@ -255,6 +251,13 @@ impl MetadataIndex {
         }
     }
 
+    pub fn cached_cwd(&self, path: &Path) -> Option<&str> {
+        let entry = self.entries.get(path.to_str()?)?;
+        (entry.present && entry.stamp == Stamp::new(&path.metadata().ok()?))
+            .then_some(entry.row.cwd.as_str())
+            .filter(|cwd| !cwd.is_empty())
+    }
+
     pub fn refresh(&mut self, path: &Path, agent: &str) -> Vec<Row> {
         if agent == "agy" {
             return match crate::agy::session(&path.to_string_lossy()) {
@@ -346,94 +349,6 @@ impl MetadataIndex {
             .flat_map(|(path, source)| self.refresh(Path::new(&path), &source))
             .filter(|row| row.id == id && (sub || !row.sub))
             .map(|row| row.path)
-            .collect()
-    }
-
-    pub fn search(&mut self, rows: Vec<Row>, query: &str, regex: bool) -> Vec<Row> {
-        let directory = self.root.join("search");
-        std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(&directory)
-            .unwrap();
-        let mut keys = HashMap::new();
-        for row in &rows {
-            let name = format!("{:016x}.txt", digest(row.path.as_bytes()));
-            assert!(
-                keys.insert(name.clone(), row.path.clone()).is_none(),
-                "duplicate metadata path"
-            );
-            let text = format!(
-                "{}\n{}\n{}\n{}\n{}\n",
-                row.id, row.title, row.cwd, row.opening, row.path
-            );
-            let path = directory.join(name);
-            let old = std::fs::read_to_string(&path).unwrap_or_default();
-            if old != text {
-                let temporary = path.with_extension(format!("{}.tmp", std::process::id()));
-                write_private(&temporary, text.as_bytes()).unwrap();
-                std::fs::rename(temporary, path).unwrap();
-            }
-        }
-        if query.is_empty() {
-            return rows;
-        }
-        let wanted = if regex {
-            query.to_string()
-        } else {
-            regex::escape(query)
-        };
-        let pattern = regex::Regex::new(&format!("(?i){wanted}")).expect("bad query");
-        let candidates: HashSet<String> = if regex || query.contains('\n') {
-            rows.iter().map(|row| row.path.clone()).collect()
-        } else {
-            let mut picker = FilePicker::new(FilePickerOptions {
-                base_path: directory.to_string_lossy().into_owned(),
-                watch: false,
-                mode: FFFMode::Ai,
-                ..Default::default()
-            })
-            .expect("cannot create FFF metadata search");
-            picker.collect_files().expect("cannot index metadata files");
-            let query = format!(
-                "(?u){}",
-                query
-                    .chars()
-                    .map(|character| format!(r"\x{{{:x}}}", character as u32))
-                    .collect::<String>()
-            );
-            let parsed = FFFQuery {
-                raw_query: &query,
-                constraints: Default::default(),
-                fuzzy_query: FuzzyQuery::Text(&query),
-                location: None,
-            };
-            let result = picker.grep(
-                &parsed,
-                &GrepSearchOptions {
-                    casing: Some(Casing::Insensitive),
-                    mode: GrepMode::Regex,
-                    max_matches_per_file: 1,
-                    page_limit: picker.get_files().len() + 1,
-                    ..Default::default()
-                },
-            );
-            assert!(result.regex_fallback_error.is_none());
-            result
-                .files
-                .iter()
-                .filter_map(|file| keys.get(&file.relative_path(&picker)).cloned())
-                .collect()
-        };
-        rows.into_iter()
-            .filter(|row| {
-                candidates.contains(&row.path)
-                    && (pattern.is_match(&row.id)
-                        || pattern.is_match(&row.title)
-                        || pattern.is_match(&row.cwd)
-                        || pattern.is_match(&row.opening)
-                        || pattern.is_match(&row.path))
-            })
             .collect()
     }
 

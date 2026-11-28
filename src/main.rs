@@ -18,6 +18,8 @@ mod transcript;
 
 use clap::{Parser, ValueEnum};
 use sessions::{Row, SOURCES};
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::io::{BufReader, BufWriter, Cursor, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Component, Path, PathBuf};
@@ -58,7 +60,7 @@ Examples:
 
 -n limits matches; put the session name in the query.
 
-Name search matches cached IDs, names, projects, and opening messages using FFF.
+Name search matches cached IDs, names, working directories, paths, and opening messages.
 Results are newest-first, limited by -n or an exact name (literal queries only).
 Read/preview/resume selects the newest match. Queries ignore case; --re uses a regex.
 Metadata updates automatically; JSONL appends are read from the saved offset.
@@ -182,10 +184,12 @@ fn normalize_path(value: &str) -> Result<PathBuf, String> {
     Ok(normalized.canonicalize().unwrap_or(normalized))
 }
 
+fn matches_directory(recorded: &str, cwd: &Path) -> bool {
+    Path::new(recorded).is_absolute() && normalize_path(recorded).is_ok_and(|path| path == cwd)
+}
+
 fn matches_cwd(row: &Row, cwd: Option<&Path>) -> bool {
-    cwd.is_none_or(|cwd| {
-        Path::new(&row.cwd).is_absolute() && normalize_path(&row.cwd).is_ok_and(|path| path == cwd)
-    })
+    cwd.is_none_or(|cwd| matches_directory(&row.cwd, cwd))
 }
 
 fn path_matches_cwd(path: &str, cwd: Option<&Path>) -> bool {
@@ -563,7 +567,22 @@ fn main() {
     let mut name_search_stopped = false;
     let mut exact_name = false;
     let mut rows = if args.content && !query.is_empty() {
-        sessions::search_content(&query, args.regex, args.agent.as_deref())
+        let checked = RefCell::new(HashMap::new());
+        let in_cwd = args.cwd.as_deref().map(|cwd| {
+            move |recorded: &str| {
+                *checked
+                    .borrow_mut()
+                    .entry(recorded.to_owned())
+                    .or_insert_with(|| matches_directory(recorded, cwd))
+            }
+        });
+        sessions::search_content(
+            &query,
+            args.regex,
+            args.agent.as_deref(),
+            args.sub,
+            in_cwd.as_ref().map(|f| f as &dyn Fn(&str) -> bool),
+        )
     } else if !args.regex && sessions::looks_like_id(&query) {
         sessions::resolve_id(&query, args.agent.as_deref(), args.sub)
             .into_iter()
@@ -605,10 +624,7 @@ fn main() {
     if let Some(agent) = &args.agent {
         rows.retain(|r| &r.agent == agent);
     }
-    if args.cwd.is_some() {
-        if args.content {
-            sessions::hydrate(&mut rows, &query);
-        }
+    if args.cwd.is_some() && (!args.content || query.is_empty()) {
         rows.retain(|row| matches_cwd(row, args.cwd.as_deref()));
     }
     if !args.sub {

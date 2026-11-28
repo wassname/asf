@@ -47,15 +47,8 @@ struct Record {
     payload: String,
 }
 
-fn load(path: &str, at: u64, opening: bool) -> Result<(Row, Vec<Record>), String> {
+fn load(path: &str, filter: &str) -> Result<(Row, Vec<Record>), String> {
     // The first result is trajectory metadata; subsequent results are chat steps in source order.
-    let filter = if opening {
-        "step_type = 14".into()
-    } else if at > 0 {
-        format!("step_type IN (14,15) AND idx = {}", at - 1)
-    } else {
-        "step_type IN (14,15)".into()
-    };
     let sql = format!(
         "SELECT -1 AS idx, 0 AS kind, 0 AS format,
         hex((SELECT data FROM trajectory_metadata_blob WHERE id = 'main')) AS payload
@@ -138,7 +131,14 @@ pub fn conversation(path: &str, at: u64, show: Show) -> Result<(Row, Vec<Message
 }
 
 fn collect(path: &str, at: u64, show: Show, opening: bool) -> Result<(Row, Vec<Message>), String> {
-    let (mut row, records) = load(path, at, opening)?;
+    let filter = if opening {
+        "step_type = 14".into()
+    } else if at > 0 {
+        format!("step_type IN (14,15) AND idx = {}", at - 1)
+    } else {
+        "step_type IN (14,15)".into()
+    };
+    let (mut row, records) = load(path, &filter)?;
     let mut messages = Vec::new();
     for record in records {
         let message = record
@@ -158,12 +158,22 @@ fn collect(path: &str, at: u64, show: Show, opening: bool) -> Result<(Row, Vec<M
     Ok((row, messages))
 }
 
-pub fn search_content(pattern: &regex::Regex, query: &str) -> Vec<Row> {
+pub fn search_content(
+    pattern: &regex::Regex,
+    query: &str,
+    in_cwd: Option<&dyn Fn(&str) -> bool>,
+) -> Vec<Row> {
     paths()
         .into_iter()
         .filter_map(|path| {
+            let path = path.to_str()?;
+            if let Some(in_cwd) = in_cwd
+                && !load(path, "0").is_ok_and(|(row, _)| in_cwd(&row.cwd))
+            {
+                return None;
+            }
             let (mut row, messages) = match conversation(
-                path.to_str()?,
+                path,
                 0,
                 Show {
                     tools: true,

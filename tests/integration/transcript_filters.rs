@@ -133,6 +133,19 @@ fn antigravity_reads_native_sqlite_and_keeps_step_numbers() {
         stdout(&home.run(&["-a", "agy", "-c", "--paths", "duplicate entry"])).trim(),
         path
     );
+    // A scoped search must not decode the unrelated conversation. -- PI/OpenAI
+    stdout(
+        &Command::new("sqlite3")
+            .arg(&child_path)
+            .arg("UPDATE steps SET step_format = 99;")
+            .output()
+            .unwrap(),
+    );
+    let scoped = home.run(&[
+        "-a", "agy", "-c", "--paths", "--sub", "--cwd", "/tmp/asf project", "duplicate entry",
+    ]);
+    assert_eq!(stdout(&scoped).trim(), path);
+    assert!(scoped.stderr.is_empty(), "{}", String::from_utf8_lossy(&scoped.stderr));
     let rows = records(&home.run(&["-a", "agy", "-r", &ID[..8], "--jsonl"]));
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[1]["source"]["index"], 3);
